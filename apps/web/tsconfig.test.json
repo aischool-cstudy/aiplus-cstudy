@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "rootDir": "src",
+    "incremental": false
+  },
+  "include": [
+    "src/lib/ai/errors.ts",
+    "src/lib/ai/errors.test.ts",
+    "src/lib/quiz/options.ts",
+    "src/lib/quiz/options.test.ts",
+    "src/lib/analytics/run-metrics.ts",
+    "src/lib/analytics/run-metrics.test.ts",
+    "src/lib/analytics/error-breakdown.ts",
+    "src/lib/analytics/error-breakdown.test.ts",
+    "src/lib/curriculum/language.ts",
+    "src/lib/curriculum/language.test.ts",
+    "src/lib/curriculum/concept-signal.ts",
+    "src/lib/curriculum/concept-signal.test.ts",
+    "src/lib/runtime/request-lock.ts",
+    "src/lib/runtime/request-lock.test.ts"
+  ]
+}

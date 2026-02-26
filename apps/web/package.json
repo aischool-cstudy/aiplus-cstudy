@@ -1,0 +1,36 @@
+{
+  "name": "web",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "bash -lc 'set -a; [ -f ../../.env ] && source ../../.env; set +a; next dev --webpack'",
+    "build": "bash -lc 'set -a; [ -f ../../.env ] && source ../../.env; set +a; next build --webpack'",
+    "start": "bash -lc 'set -a; [ -f ../../.env ] && source ../../.env; set +a; next start'",
+    "lint": "bash -lc 'rm -rf .test-dist && eslint'",
+    "typecheck": "tsc --noEmit",
+    "test": "bash -lc 'rm -rf .test-dist; if [ -x ./node_modules/.bin/vitest ]; then ./node_modules/.bin/vitest run; STATUS=$?; else tsc -p tsconfig.test.json && node --test .test-dist/lib/**/*.test.js; STATUS=$?; fi; rm -rf .test-dist; exit $STATUS'"
+  },
+  "dependencies": {
+    "@aiplus/contracts": "*",
+    "@opentelemetry/api": "^1.9.0",
+    "@supabase/ssr": "^0.8.0",
+    "@supabase/supabase-js": "^2.95.3",
+    "lucide-react": "^0.563.0",
+    "next": "16.1.6",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20.14.10",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.6",
+    "tailwindcss": "^4",
+    "typescript": "^5.5.4"
+  }
+}

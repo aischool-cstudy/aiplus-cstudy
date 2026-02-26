@@ -1,0 +1,12 @@
+{
+  "name": "api",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "bash -lc 'if [ ! -x .venv/bin/python ]; then echo \"[api] .venv가 없습니다. cd apps/api && python3 -m venv .venv && source .venv/bin/activate && pip install -e .\"; exit 1; fi; if ! .venv/bin/python -c \"import uvicorn\" >/dev/null 2>&1; then echo \"[api] uvicorn 미설치 상태입니다. source .venv/bin/activate && pip install -e . 를 실행하세요.\"; exit 1; fi; .venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000'",
+    "build": "python3 -m compileall -q app",
+    "lint": "python3 -m compileall -q app",
+    "typecheck": "python3 -m compileall -q app",
+    "test": "bash -lc 'PY=.venv/bin/python; if [ ! -x \"$PY\" ]; then PY=python3; fi; $PY -m compileall -q app && if $PY -m pytest --version >/dev/null 2>&1; then $PY -m pytest -q; else $PY -m unittest discover -s tests -p \"test_*.py\"; fi'"
+  }
+}

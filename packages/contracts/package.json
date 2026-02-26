@@ -1,0 +1,30 @@
+{
+  "name": "@aiplus/contracts",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./openapi": {
+      "types": "./dist/openapi.d.ts",
+      "default": "./dist/openapi.js"
+    }
+  },
+  "scripts": {
+    "dev": "echo 'contracts: no dev server'",
+    "generate:openapi": "node ./scripts/generate-openapi-types.mjs",
+    "check:openapi": "node ./scripts/generate-openapi-types.mjs --check",
+    "build": "npm run generate:openapi && tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run check:openapi && tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
