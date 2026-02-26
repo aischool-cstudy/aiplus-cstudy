@@ -34,5 +34,5 @@
 - 검증: `npm run test --workspace @aiplus/contracts`
 
 ## Extension Strategy
-- Practice Sandbox는 `app/domain/practice/provider.py` 인터페이스로 분리
-- 실행 엔진(Judge0/Piston/커스텀)은 Provider 교체만으로 확장 가능
+- Practice Sandbox는 현재 본 운영 경로에 미연결 상태이며, 실행 엔진 연동이 계획되어 있음
+- 실행 엔진(Judge0/Piston/커스텀)은 provider 추상화 계층으로 교체 가능하게 설계 예정
