@@ -33,6 +33,9 @@
 4. API 입출력이 바뀌면 `openapi.yaml`을 갱신합니다.
 5. 변경 경계를 검증하는 테스트를 추가합니다.
 
+참고:
+- `docs/practice-api-draft-v0.yaml`의 Practice 실행 API는 현재 `apps/api`가 아닌 외부 실행 서비스(예: Nest) 대상으로 정의되어 있습니다.
+
 ## 5) 기존 생성 파이프라인 핵심 파일
 - 생성/정규화/품질: `apps/api/app/services/compat/generation_service.py`
 - 정규화 유틸: `apps/api/app/services/compat/normalizer_validator.py`
@@ -50,6 +53,11 @@ API만 직접:
 cd apps/api
 source .venv/bin/activate
 python -m pytest -q
+```
+
+품질 리포트:
+```bash
+npm run quality:report --workspace api
 ```
 
 ## 7) 리뷰 기준

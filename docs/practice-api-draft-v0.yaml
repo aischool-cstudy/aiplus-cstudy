@@ -1,0 +1,80 @@
+openapi: 3.1.0
+info:
+  title: AI+ Practice API (Draft)
+  version: 0.1.0-draft
+  description: |
+    Next.js <-> Nest.js 실습 실행 API 최소 합의안.
+
+servers:
+  - url: http://localhost:8100
+
+paths:
+  /v1/practice/run:
+    post:
+      summary: 코드 실행
+      description: 화면에서 "코드 실행" 버튼을 누를 때 호출한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PracticeRunRequest"
+      responses:
+        "200":
+          description: 실행 완료(정답/오답 모두 포함)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PracticeRunResponse"
+        "400":
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    PracticeRunRequest:
+      type: object
+      required: [problem_id, code]
+      properties:
+        problem_id:
+          type: string
+          description: 문제 식별자
+        code:
+          type: string
+          minLength: 1
+          description: 사용자 제출 코드
+
+    PracticeRunResponse:
+      type: object
+      required: [passed, stdout, stderr]
+      properties:
+        passed:
+          type: boolean
+          description: true면 정답 화면효과, false면 실패 화면효과
+        stdout:
+          type: string
+        stderr:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+          enum:
+            - schema_mismatch
+            - timeout
+            - internal_error
+            - unknown
+        message:
+          type: string

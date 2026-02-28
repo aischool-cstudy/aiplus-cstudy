@@ -49,7 +49,8 @@ npm run dev:web
 
 ## 4) 팀 공통 개발 규칙
 ### 필수
-- API 입출력 변경 시 OpenAPI(`packages/contracts/openapi/openapi.yaml`)를 함께 수정합니다.
+- 내부 FastAPI 입출력 변경 시 OpenAPI(`packages/contracts/openapi/openapi.yaml`)를 함께 수정합니다.
+- Practice 실행 API 변경 시 `docs/practice-api-draft-v0.yaml` + `packages/contracts/src/practice.ts`를 함께 수정합니다.
 - Web 에러 분기는 `error_code` 기준으로만 처리합니다.
 - 머지 전 `npm run test`를 통과합니다.
 ### 권장
@@ -69,9 +70,9 @@ npm run lint
 ```
 3. PR 작성 시
 - 변경 이유와 영향 범위를 요약합니다.
-- API 계약 변경이 있으면 OpenAPI를 먼저 갱신하고, 필요 시 문서를 함께 갱신합니다.
+- API 계약 변경이 있으면(내부 FastAPI: OpenAPI, Practice: draft+DTO) 관련 계약 파일을 먼저 갱신하고 문서를 함께 갱신합니다.
 
 ## 6) 자주 막히는 포인트
 - `FASTAPI_URL` 미설정: Web에서 API 호출이 실패할 수 있습니다.
 - API 가상환경 미설치: `npm run dev:api`가 실패합니다.
-- OpenAPI 갱신 누락: contracts 테스트에서 실패합니다.
+- 계약 갱신 누락(OpenAPI 또는 Practice draft/DTO): 타입/연동 동기화가 깨질 수 있습니다.
