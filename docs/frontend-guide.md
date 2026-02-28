@@ -4,6 +4,9 @@
 - 라우트 페이지: `apps/web/src/app`
 - 서버 액션: `apps/web/src/actions`
 - AI 클라이언트/스키마: `apps/web/src/lib/ai`
+- Practice 클라이언트: `apps/web/src/lib/practice`
+- 런타임 유틸: `apps/web/src/lib/runtime`
+- 복습 점수 유틸: `apps/web/src/lib/review`
 - 폼 파서: `apps/web/src/lib/forms/learner-form.ts`
 - 공통 상수: `apps/web/src/lib/constants/options.ts`
 - 분석 유틸: `apps/web/src/lib/analytics`
@@ -43,7 +46,19 @@
 - `apps/web/src/lib/analytics/run-metrics.ts`
 - `apps/web/src/lib/analytics/error-breakdown.ts`
 
-## 6) 테스트/검증
+## 6) Practice 실행 흐름
+1. UI 컴포넌트(`PracticeRunner`)가 코드 실행 액션을 호출합니다.
+2. 서버 액션(`apps/web/src/actions/practice.ts`)에서 입력 검증 후 클라이언트를 호출합니다.
+3. 클라이언트(`apps/web/src/lib/practice/client.ts`)가 `POST {PRACTICE_API_BASE_URL}/v1/practice/run` 요청을 보냅니다.
+4. 응답은 `@aiplus/contracts`의 `PracticeRunResponse`, `PracticeErrorResponse` 타입으로 해석합니다.
+
+관련 파일:
+- `apps/web/src/components/features/learn/practice-runner.tsx`
+- `apps/web/src/actions/practice.ts`
+- `apps/web/src/lib/practice/client.ts`
+- `packages/contracts/src/practice.ts`
+
+## 7) 테스트/검증
 필수:
 ```bash
 npm run test --workspace web
@@ -54,7 +69,7 @@ npm run typecheck --workspace web
 npm run lint --workspace web
 ```
 
-## 7) 리뷰 기준
+## 8) 리뷰 기준
 ### 필수
 - 문자열 contains 기반 에러 분기가 없는지
 - 서버 액션에서 입력 검증 누락이 없는지

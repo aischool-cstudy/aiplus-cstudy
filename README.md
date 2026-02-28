@@ -10,7 +10,7 @@
 ## 프로젝트 구조
 - `apps/web`: Next.js 웹 애플리케이션(라우트/컴포넌트/서버 액션)
 - `apps/api`: FastAPI 서비스(도메인 로직/API 제공)
-- `packages/contracts`: OpenAPI 및 공통 계약 타입
+- `packages/contracts`: OpenAPI 및 공통 계약 타입(Practice DTO 포함)
 - `infra/migrations`: 데이터베이스 마이그레이션
 - `docs`: 아키텍처 및 데이터 수집 문서
 
@@ -22,6 +22,7 @@
 - API 계약(OpenAPI) 가이드: `docs/contracts-guide.md`
 - 아키텍처 요약: `docs/architecture.md`
 - 데이터 수집 맵: `docs/data-collection-map.md`
+- 실습 실행 API 드래프트: `docs/practice-api-draft-v0.yaml`
 
 ## 주요 기능 (운영 상태)
 운영중:
@@ -32,7 +33,7 @@
 
 부분운영/계획:
 1. 추천 퍼널은 `impression`, `click` 중심으로 운영 중 (`start/complete/dismiss` 확장 예정)
-2. Practice Sandbox 실행 엔진 연동은 계획 단계
+2. Practice 실행 UI/호출은 연동됨 (`/v1/practice/run`), 실행 엔진 백엔드 서비스는 별도 구현/운영
 
 ## 아키텍처 원칙 (현재)
 - AI 호출 단일 관문: `apps/api` (FastAPI)
@@ -94,6 +95,9 @@ cp .env.example .env
 - `FASTAPI_URL=http://localhost:8000`
 - `AI_PROVIDER` (`gemini` 또는 `openai`)
 
+선택(실습 실행 연동):
+- `PRACTICE_API_BASE_URL=http://localhost:8100`
+
 공급자별 필수:
 - `AI_PROVIDER=gemini`: `GEMINI_API_KEY` (또는 `GOOGLE_GENERATIVE_AI_API_KEY`)
 - `AI_PROVIDER=openai`: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`
@@ -139,7 +143,10 @@ npm run build
 npm run lint
 npm run typecheck
 npm run test
+npm run quality:report
 ```
+
+`quality:report`는 API 골든셋 케이스를 기준으로 생성 품질 점수 리포트를 출력합니다.
 
 계약(OpenAPI) 타입만 갱신/검증하려면:
 ```bash
