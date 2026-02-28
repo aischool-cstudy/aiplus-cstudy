@@ -2,6 +2,11 @@
 
 import { createClient } from '@/lib/supabase/server';
 import type { GeneratedContent, Course, Topic, HistoryContentItem, QuizQuestion } from '@/types';
+import {
+  computeReviewAssessment,
+  diffDays,
+  parseWrongQuestionIndexes,
+} from '@/lib/review/assessment';
 
 export async function getContent(contentId: string): Promise<GeneratedContent | null> {
   const supabase = await createClient();
@@ -23,18 +28,6 @@ export async function getUserContents(userId: string): Promise<GeneratedContent[
     .order('created_at', { ascending: false });
 
   return (data || []) as GeneratedContent[];
-}
-
-function parseWrongQuestionIndexes(raw: unknown): number[] {
-  if (!Array.isArray(raw)) return [];
-  return Array.from(
-    new Set(
-      raw
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value) && value >= 0)
-        .map((value) => Math.round(value))
-    )
-  ).slice(0, 20);
 }
 
 type AssessmentAttemptType = 'full' | 'wrong_only' | 'variant';
@@ -150,91 +143,6 @@ export async function getWrongReviewQueue(userId: string): Promise<WrongReviewQu
   return questions;
 }
 
-function diffDays(from: Date, to: Date): number {
-  return Math.max(0, Math.floor((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
-}
-
-function computeReviewAssessment(item: {
-  progress_status: 'not_started' | 'in_progress' | 'completed' | null;
-  quiz_score: number | null;
-  days_since_created: number;
-  days_since_last_study: number | null;
-  low_score_attempts: number;
-  understanding_rating: number | null;
-  unresolved_wrong_count: number;
-}) {
-  const factors: string[] = [];
-  let score = 0;
-
-  if (item.quiz_score !== null) {
-    if (item.quiz_score < 50) {
-      score += 35;
-      factors.push(`퀴즈 점수 ${item.quiz_score}점(+35)`);
-    } else if (item.quiz_score < 70) {
-      score += 25;
-      factors.push(`퀴즈 점수 ${item.quiz_score}점(+25)`);
-    } else if (item.quiz_score < 85) {
-      score += 10;
-      factors.push(`퀴즈 점수 ${item.quiz_score}점(+10)`);
-    }
-  }
-
-  if (item.low_score_attempts > 1) {
-    const attemptPenalty = Math.min(20, (item.low_score_attempts - 1) * 8);
-    score += attemptPenalty;
-    factors.push(`반복 오답 ${item.low_score_attempts}회(+${attemptPenalty})`);
-  }
-
-  if (item.progress_status === 'in_progress' && item.days_since_last_study !== null) {
-    const stallPenalty = Math.min(30, item.days_since_last_study * 6);
-    score += stallPenalty;
-    factors.push(`학습 중단 ${item.days_since_last_study}일(+${stallPenalty})`);
-  } else if (item.progress_status === 'completed' && item.days_since_last_study !== null) {
-    const reviewPenalty = Math.min(28, Math.max(0, item.days_since_last_study - 2) * 4);
-    if (reviewPenalty > 0) {
-      score += reviewPenalty;
-      factors.push(`완료 후 경과 ${item.days_since_last_study}일(+${reviewPenalty})`);
-    }
-  } else if (!item.progress_status || item.progress_status === 'not_started') {
-    const untouchedPenalty = Math.min(25, Math.max(0, item.days_since_created - 2) * 3);
-    if (untouchedPenalty > 0) {
-      score += untouchedPenalty;
-      factors.push(`미학습 경과 ${item.days_since_created}일(+${untouchedPenalty})`);
-    }
-  }
-
-  if (typeof item.understanding_rating === 'number') {
-    if (item.understanding_rating <= 2) {
-      score += 20;
-      factors.push(`자기 이해도 ${item.understanding_rating}/5(+20)`);
-    } else if (item.understanding_rating === 3) {
-      score += 8;
-      factors.push('자기 이해도 3/5(+8)');
-    }
-  }
-
-  if (item.unresolved_wrong_count > 0) {
-    const wrongQueuePenalty = Math.min(40, 15 + item.unresolved_wrong_count * 5);
-    score += wrongQueuePenalty;
-    factors.push(`미해결 오답 ${item.unresolved_wrong_count}문항(+${wrongQueuePenalty})`);
-  }
-
-  score = Math.min(100, Math.max(0, Math.round(score)));
-  const review_level: 'urgent' | 'soon' | 'normal' = score >= 70 ? 'urgent' : score >= 40 ? 'soon' : 'normal';
-  const needs_review = score >= 40;
-  const review_reason = needs_review
-    ? `복습 점수 ${score}점 · ${factors.slice(0, 2).join(', ')}`
-    : null;
-
-  return {
-    review_score: score,
-    review_level,
-    needs_review,
-    review_reason,
-    review_factors: factors,
-  };
-}
-
 export async function getUserHistoryContents(userId: string): Promise<HistoryContentItem[]> {
   const supabase = await createClient();
   const now = new Date();
@@ -249,6 +157,62 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
   if (contentRows.length === 0) return [];
 
   const ids = contentRows.map((c) => c.id);
+  const { data: curriculumItemRows } = await supabase
+    .from('curriculum_items')
+    .select('content_id, curriculum_id, day_number, order_in_day')
+    .in('content_id', ids);
+
+  const curriculumRowsNormalized = (curriculumItemRows || [])
+    .map((row) => ({
+      contentId: row.content_id ? String(row.content_id) : null,
+      curriculumId: row.curriculum_id ? String(row.curriculum_id) : null,
+      dayNumber: Number(row.day_number),
+      orderInDay: Number(row.order_in_day),
+    }))
+    .filter((row) => row.contentId && row.curriculumId)
+    .sort((a, b) => (
+      (Number.isFinite(a.dayNumber) ? a.dayNumber : Number.MAX_SAFE_INTEGER)
+      - (Number.isFinite(b.dayNumber) ? b.dayNumber : Number.MAX_SAFE_INTEGER)
+      || (Number.isFinite(a.orderInDay) ? a.orderInDay : Number.MAX_SAFE_INTEGER)
+      - (Number.isFinite(b.orderInDay) ? b.orderInDay : Number.MAX_SAFE_INTEGER)
+    ));
+
+  const curriculumIds = Array.from(new Set(curriculumRowsNormalized.map((row) => row.curriculumId as string)));
+  let curriculumTitleById = new Map<string, string>();
+  if (curriculumIds.length > 0) {
+    const { data: ownCurriculums } = await supabase
+      .from('user_curriculums')
+      .select('id, title')
+      .eq('user_id', userId)
+      .in('id', curriculumIds);
+    curriculumTitleById = new Map(
+      (ownCurriculums || [])
+        .map((row) => [String(row.id), String(row.title || '')])
+        .filter((row): row is [string, string] => Boolean(row[0]))
+    );
+  }
+
+  const contentSessionById = new Map<string, {
+    curriculumId: string;
+    curriculumTitle: string | null;
+    dayNumber: number | null;
+    orderInDay: number | null;
+  }>();
+  for (const row of curriculumRowsNormalized) {
+    const contentId = row.contentId as string;
+    const curriculumId = row.curriculumId as string;
+    const curriculumTitle = curriculumTitleById.get(curriculumId);
+    if (!curriculumTitle) continue;
+    if (contentSessionById.has(contentId)) continue;
+
+    contentSessionById.set(contentId, {
+      curriculumId,
+      curriculumTitle,
+      dayNumber: Number.isFinite(row.dayNumber) ? Math.max(1, Math.round(row.dayNumber)) : null,
+      orderInDay: Number.isFinite(row.orderInDay) ? Math.max(1, Math.round(row.orderInDay)) : null,
+    });
+  }
+
   const { data: progressRows } = await supabase
     .from('learning_progress')
     .select('content_id, status, quiz_score, updated_at')
@@ -335,21 +299,28 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
     const progress = byContent.get(content.id);
     const feedback = latestFeedbackByContent.get(content.id);
     const latestAttempt = latestAttemptByContent.get(content.id);
+    const sessionContext = contentSessionById.get(content.id);
     const unresolvedWrongIndexes = latestAttempt?.wrong_question_indexes || [];
     const unresolvedWrongCount = unresolvedWrongIndexes.length;
     const createdAt = new Date(content.created_at);
     const daysSinceCreated = diffDays(createdAt, now);
     const lastStudyAt = progress?.updated_at || null;
     const daysSinceLastStudy = lastStudyAt ? diffDays(new Date(lastStudyAt), now) : null;
-    const review = computeReviewAssessment({
-      progress_status: progress?.status || null,
-      quiz_score: progress?.quiz_score ?? null,
-      days_since_created: daysSinceCreated,
-      days_since_last_study: daysSinceLastStudy,
-      low_score_attempts: progress?.low_score_attempts || 0,
-      understanding_rating: feedback?.understanding_rating ?? null,
-      unresolved_wrong_count: unresolvedWrongCount,
-    });
+    const review = computeReviewAssessment(
+      {
+        progressStatus: progress?.status || null,
+        quizScore: progress?.quiz_score ?? null,
+        daysSinceCreated,
+        daysSinceLastStudy,
+        lowScoreAttempts: progress?.low_score_attempts || 0,
+        understandingRating: feedback?.understanding_rating ?? null,
+        unresolvedWrongCount,
+      },
+      {
+        detailedFactors: true,
+        understandingLabel: '자기 이해도',
+      }
+    );
 
     return {
       ...content,
@@ -358,13 +329,18 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
       last_studied_at: lastStudyAt,
       last_assessment_at: latestAttempt?.created_at || null,
       last_assessment_type: latestAttempt?.attempt_type || null,
+      session_source: sessionContext ? 'curriculum' : 'standalone',
+      curriculum_id: sessionContext?.curriculumId || null,
+      curriculum_title: sessionContext?.curriculumTitle || null,
+      curriculum_day_number: sessionContext?.dayNumber ?? null,
+      curriculum_order_in_day: sessionContext?.orderInDay ?? null,
       unresolved_wrong_count: unresolvedWrongCount,
       unresolved_wrong_indexes: unresolvedWrongIndexes,
-      needs_review: review.needs_review,
-      review_reason: review.review_reason,
-      review_score: review.review_score,
-      review_level: review.review_level,
-      review_factors: review.review_factors,
+      needs_review: review.needsReview,
+      review_reason: review.reviewReason,
+      review_score: review.reviewScore,
+      review_level: review.reviewLevel,
+      review_factors: review.reviewFactors,
       days_since_created: daysSinceCreated,
     };
   });

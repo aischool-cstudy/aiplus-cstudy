@@ -27,6 +27,8 @@
     "src/lib/curriculum/concept-signal.ts",
     "src/lib/curriculum/concept-signal.test.ts",
     "src/lib/runtime/request-lock.ts",
-    "src/lib/runtime/request-lock.test.ts"
+    "src/lib/runtime/request-lock.test.ts",
+    "src/lib/practice/client.ts",
+    "src/lib/practice/client.test.ts"
   ]
 }

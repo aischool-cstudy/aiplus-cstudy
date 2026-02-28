@@ -22,6 +22,7 @@ import type { ApiErrorCode, ApiErrorResponse } from '@aiplus/contracts';
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 const FASTAPI_MAX_RETRIES = Number(process.env.FASTAPI_MAX_RETRIES || 0);
 const FASTAPI_RETRY_BASE_MS = Number(process.env.FASTAPI_RETRY_BASE_MS || 250);
+const FASTAPI_TIMEOUT_MS = Number(process.env.FASTAPI_TIMEOUT_MS || 70000);
 const AI_PROVIDER = String(process.env.AI_PROVIDER || 'gemini').trim().toLowerCase();
 const AI_MODEL = AI_PROVIDER === 'openai'
   ? (process.env.OPENAI_MODEL || 'gpt-4o-mini')
@@ -93,12 +94,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isAbortLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === 'AbortError' || error.name === 'TimeoutError';
+}
+
 function shouldRetry(error: unknown): boolean {
   if (error instanceof RemoteHttpError) {
     if (typeof error.retryable === 'boolean') {
       return error.retryable;
     }
     return [408, 429, 502, 503, 504].includes(error.status);
+  }
+  if (error instanceof RemoteRequestError) {
+    if (typeof error.retryable === 'boolean') {
+      return error.retryable;
+    }
+    return error.status === 504;
+  }
+  if (isAbortLikeError(error)) {
+    return true;
   }
   if (error instanceof TypeError) {
     // fetch 네트워크 오류는 TypeError로 떨어짐
@@ -196,13 +211,20 @@ function parseErrorBody(raw: unknown): { detail: string; errorCode: ApiErrorCode
 async function postJson<T>(path: string, body: unknown): Promise<PostJsonResult<T>> {
   const maxRetries = Number.isFinite(FASTAPI_MAX_RETRIES) ? Math.max(0, FASTAPI_MAX_RETRIES) : 1;
   const retryBaseMs = Number.isFinite(FASTAPI_RETRY_BASE_MS) ? Math.max(50, FASTAPI_RETRY_BASE_MS) : 250;
+  const requestTimeoutMs = Number.isFinite(FASTAPI_TIMEOUT_MS)
+    ? Math.max(1_000, Math.round(FASTAPI_TIMEOUT_MS))
+    : 70_000;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs);
+
     try {
       const res = await fetch(`${FASTAPI_URL}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
       if (!res.ok) {
         const rawText = await res.text().catch(() => '');
@@ -220,17 +242,36 @@ async function postJson<T>(path: string, body: unknown): Promise<PostJsonResult<
         meta: buildCallMeta(path, attempt + 1, res.status),
       };
     } catch (error) {
-      const status = error instanceof RemoteHttpError ? error.status : null;
-      const errorCode = error instanceof RemoteHttpError ? error.errorCode : null;
-      const retryable = error instanceof RemoteHttpError ? error.retryable : null;
-      if (attempt >= maxRetries || !shouldRetry(error)) {
-        const baseMessage = error instanceof Error ? error.message : 'Remote API unknown failure';
+      const timeoutError = isAbortLikeError(error)
+        ? new RemoteRequestError(
+          path,
+          attempt + 1,
+          504,
+          'timeout',
+          true,
+          `Remote API timed out after ${requestTimeoutMs}ms`
+        )
+        : null;
+      const finalError = timeoutError || error;
+      const status = finalError instanceof RemoteHttpError || finalError instanceof RemoteRequestError
+        ? finalError.status
+        : null;
+      const errorCode = finalError instanceof RemoteHttpError || finalError instanceof RemoteRequestError
+        ? finalError.errorCode
+        : null;
+      const retryable = finalError instanceof RemoteHttpError || finalError instanceof RemoteRequestError
+        ? finalError.retryable
+        : null;
+      if (attempt >= maxRetries || !shouldRetry(finalError)) {
+        const baseMessage = finalError instanceof Error ? finalError.message : 'Remote API unknown failure';
         const message = attempt > 0 ? `${baseMessage} (after ${attempt + 1} attempts)` : baseMessage;
         throw new RemoteRequestError(path, attempt + 1, status, errorCode, retryable, message);
       }
 
       const waitMs = retryBaseMs * (2 ** attempt);
       await sleep(waitMs);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 

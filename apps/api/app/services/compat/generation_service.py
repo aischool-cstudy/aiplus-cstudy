@@ -312,6 +312,54 @@ def _extract_topic_keywords(topic: str) -> list[str]:
     return tokens[:5]
 
 
+def _extract_semantic_tokens(text: str) -> set[str]:
+    raw_tokens = re.findall(r"[A-Za-z가-힣0-9_#+.-]+", text.lower())
+    skip = {
+        "핵심",
+        "토픽",
+        "주제",
+        "학습",
+        "개념",
+        "문제",
+        "설명",
+        "예제",
+        "확인",
+        "요약",
+        "정리",
+        "섹션",
+        "정답",
+        "오답",
+        "선택지",
+        "코드",
+        "기본",
+        "단계",
+        "내용",
+        "방법",
+        "사용",
+        "구현",
+        "처리",
+        "결과",
+        "and",
+        "the",
+        "for",
+        "with",
+        "from",
+        "this",
+        "that",
+    }
+    tokens: set[str] = set()
+    for token in raw_tokens:
+        normalized = token.strip("._- ")
+        if len(normalized) < 2:
+            continue
+        if normalized.isdigit():
+            continue
+        if normalized in skip:
+            continue
+        tokens.add(normalized)
+    return tokens
+
+
 def _count_non_empty_lines(code: str) -> int:
     return len([line for line in code.splitlines() if line.strip()])
 
@@ -418,6 +466,16 @@ def _sections_quality_issues(result: dict[str, Any], payload: ReasoningRequest) 
         if len(example_explanation) < 70:
             issues.append("example_explanation_too_short")
 
+    # check 문항은 앞선 concept/example 근거로 풀이 가능해야 한다.
+    reference_text = " ".join(
+        f"{str(section.get('title') or '')} {str(section.get('body') or '')} "
+        f"{str(section.get('code') or '')} {str(section.get('explanation') or '')}"
+        for section in [*type_map["concept"][:1], *type_map["example"][:1]]
+        if isinstance(section, dict)
+    )
+    reference_tokens = _extract_semantic_tokens(reference_text)
+    topic_tokens = set(_extract_topic_keywords(payload.topic))
+
     for index, check in enumerate(type_map["check"][:2], start=1):
         question = str(check.get("question") or "").strip()
         explanation = str(check.get("explanation") or "").strip()
@@ -434,6 +492,12 @@ def _sections_quality_issues(result: dict[str, Any], payload: ReasoningRequest) 
             issues.append(f"check{index}_explanation_too_short")
         if len(meaningful_options) < 4:
             issues.append(f"check{index}_options_invalid")
+        if reference_tokens:
+            check_basis_text = " ".join([question, explanation, *meaningful_options])
+            check_tokens = _extract_semantic_tokens(check_basis_text)
+            overlap = (check_tokens & reference_tokens) - topic_tokens
+            if check_tokens and len(overlap) < 1:
+                issues.append(f"check{index}_grounding_low")
 
     keywords = _extract_topic_keywords(payload.topic)
     if keywords:
@@ -739,17 +803,16 @@ def _fallback_curriculum(payload: CurriculumGenerateRequest) -> dict[str, Any]:
     topic_count, _ = _topic_count_policy(payload)
     topics: list[dict[str, Any]] = []
     for idx in range(topic_count):
-        is_practice = idx in {max(2, topic_count // 3), max(3, (topic_count * 2) // 3), topic_count - 1}
-        title = f"{idx + 1}. {'실전 과제' if is_practice else '핵심 토픽'} {idx + 1}"
+        title = f"{idx + 1}. 핵심 학습 주제 {idx + 1}"
         description = (
-            f"{payload.goal} 달성을 위해 필요한 개념을 학습하고, "
-            f"{'작은 결과물을 구현해 검증합니다.' if is_practice else '예제로 이해를 점검합니다.'}"
+            f"{payload.goal} 달성을 위해 필요한 핵심 개념을 학습하고, "
+            "예제와 확인 문제로 이해를 점검합니다."
         )
         topics.append(
             {
                 "title": title,
                 "description": description,
-                "estimated_minutes": 90 if is_practice else 60,
+                "estimated_minutes": 60,
             }
         )
 
@@ -758,7 +821,7 @@ def _fallback_curriculum(payload: CurriculumGenerateRequest) -> dict[str, Any]:
         "title": f"{payload.goal} 맞춤 커리큘럼",
         "topics": topics,
         "total_estimated_hours": max(1.0, total_hours),
-        "summary": "목표 달성을 위해 개념 학습과 실전 적용을 균형 있게 배치한 경로입니다.",
+        "summary": "목표 달성을 위해 핵심 개념을 단계적으로 학습하도록 구성한 경로입니다.",
     }
 
 
@@ -789,10 +852,10 @@ def _normalize_curriculum(
 
         description = _as_non_empty_str(
             item.get("description"),
-            f"{title} 학습 내용을 구체적으로 설명합니다." if strict else f"{title}의 핵심 개념을 학습하고 실습으로 이해를 검증합니다.",
+            f"{title} 학습 내용을 구체적으로 설명합니다." if strict else f"{title}의 핵심 개념을 학습하고 예제와 확인 문제로 이해를 검증합니다.",
         )
         if _looks_non_korean(description) and not strict:
-            description = f"{title}의 핵심을 학습하고 {payload.goal} 목표에 맞는 실습으로 이해를 확인합니다."
+            description = f"{title}의 핵심을 학습하고 {payload.goal} 목표와 연결해 이해를 확인합니다."
 
         estimated = _safe_int(item.get("estimated_minutes"), 50)
         estimated = max(35, min(90, estimated))
@@ -809,15 +872,14 @@ def _normalize_curriculum(
         if len(topics) < minimum:
             start = len(topics)
             for idx in range(start, minimum):
-                is_practice = idx in {max(2, minimum // 3), max(3, (minimum * 2) // 3), minimum - 1}
                 topics.append(
                     {
-                        "title": f"{idx + 1}. {'실전 과제' if is_practice else '핵심 토픽'}",
+                        "title": f"{idx + 1}. 핵심 학습 주제",
                         "description": (
                             f"{payload.goal} 목표에 필요한 내용을 학습하고 "
-                            f"{'작은 결과물을 만들어 검증합니다.' if is_practice else '예제 실습으로 이해를 점검합니다.'}"
+                            "예제와 확인 문제로 이해를 점검합니다."
                         ),
-                        "estimated_minutes": 70 if is_practice else 50,
+                        "estimated_minutes": 50,
                     }
                 )
 
@@ -853,15 +915,9 @@ def _is_generic_curriculum_topic_title(title: str) -> bool:
     normalized = re.sub(r"\s+", " ", title.strip().lower())
     if not normalized:
         return True
-    if re.fullmatch(r"\d+\s*\.?\s*(핵심 토픽|보강 토픽|실전 과제)\s*\d*", normalized):
+    if re.fullmatch(r"\d+\s*\.?\s*(핵심 토픽|보강 토픽)\s*\d*", normalized):
         return True
-    return normalized in {"핵심 토픽", "보강 토픽", "실전 과제", "topic"}
-
-
-def _is_practice_curriculum_topic(topic: dict[str, Any]) -> bool:
-    text = f"{str(topic.get('title') or '')} {str(topic.get('description') or '')}".lower()
-    keywords = ["실습", "프로젝트", "구현", "과제", "포트폴리오", "미니 프로젝트", "mini project", "응용"]
-    return any(keyword in text for keyword in keywords)
+    return normalized in {"핵심 토픽", "보강 토픽", "topic"}
 
 
 def _curriculum_quality_issues(result: dict[str, Any], payload: CurriculumGenerateRequest) -> list[str]:
@@ -883,7 +939,6 @@ def _curriculum_quality_issues(result: dict[str, Any], payload: CurriculumGenera
     if len(summary) < 50:
         issues.append("summary_too_short")
 
-    practice_count = 0
     generic_title_count = 0
     for idx, topic in enumerate(topics[:24], start=1):
         if not isinstance(topic, dict):
@@ -901,13 +956,9 @@ def _curriculum_quality_issues(result: dict[str, Any], payload: CurriculumGenera
             issues.append(f"topic{idx}_description_too_short")
         if _looks_non_korean(topic_description):
             issues.append(f"topic{idx}_description_non_korean")
-        if _is_practice_curriculum_topic(topic):
-            practice_count += 1
 
     if generic_title_count > 0:
         issues.append(f"generic_topic_titles:{generic_title_count}")
-    if practice_count < 3:
-        issues.append("practice_topic_count_lt_3")
 
     goal_keywords = _extract_topic_keywords(payload.goal)
     if goal_keywords:
@@ -946,7 +997,6 @@ def _build_curriculum_prompts(
 규칙:
 - topics는 목표 중심으로 순차 구성
 - 모든 title/description/summary는 반드시 한국어로 작성
-- 최소 3개 실습/프로젝트 토픽 포함
 - estimated_minutes는 35~90 정수
 - 너무 넓은 토픽보다 작고 구체적인 학습 단위로 나눌 것
 - title은 '핵심 토픽', '보강 토픽' 같은 일반명 금지
@@ -1158,11 +1208,12 @@ def _fallback_sections(payload: ReasoningRequest, reasoning: dict[str, Any]) -> 
                 "body": "",
                 "code": "",
                 "explanation": (
-                    "핵심 개념의 정의와 사용 목적을 연결해야 실전에서 구현 순서를 안정적으로 잡을 수 있습니다. "
+                    "예제에서 다룬 입력값 정제와 예외 입력 처리 단계를 근거로 정답을 고르면 "
+                    "구현 순서를 안정적으로 잡을 수 있습니다. "
                     "정답을 고른 뒤 왜 나머지 선택지가 아닌지도 함께 확인하세요."
                 ),
-                "question": f"{payload.topic} 학습에서 가장 먼저 확인할 것은?",
-                "options": ["핵심 개념 이해", "결과 암기", "무작정 구현", "관련 없는 설정"],
+                "question": f"{payload.topic} 예제 코드에서 가장 먼저 점검해야 할 처리 단계는?",
+                "options": ["입력값 정제와 예외 입력 처리", "정답 암기", "예외 무시", "로그 제거"],
                 "correct_answer": 0,
                 "next_preview": "",
             },
@@ -1172,11 +1223,11 @@ def _fallback_sections(payload: ReasoningRequest, reasoning: dict[str, Any]) -> 
                 "body": "",
                 "code": "",
                 "explanation": (
-                    "실무 문제에서는 요구사항을 먼저 분해하고 검증 포인트를 정한 뒤 구현해야 오류 전파를 줄일 수 있습니다. "
-                    "정답 선택의 근거를 처리 순서 관점에서 설명해 보세요."
+                    "예제처럼 처리가 끝난 값을 반환하는 단계가 있어야 함수 출력이 안정적으로 완성됩니다. "
+                    "정답 선택의 근거를 반환 흐름 관점에서 설명해 보세요."
                 ),
-                "question": f"{payload.topic}를 실전에 적용할 때 우선순위로 맞는 것은?",
-                "options": ["요구사항 분석 후 단계 구현", "정답 암기", "예외 무시", "로그 제거"],
+                "question": f"{payload.topic} 예제의 처리 흐름에서 마지막 단계 역할은?",
+                "options": ["정제된 값을 결과로 반환", "정답 암기", "예외를 무시", "입력을 제거"],
                 "correct_answer": 0,
                 "next_preview": "",
             },
@@ -1247,6 +1298,7 @@ def _build_sections_prompts(
 - concept.body는 최소 160자 이상
 - example.code는 최소 6줄 이상, hello world 같은 일반 예제 금지
 - 각 check 섹션은 4지선다 + explanation 50자 이상
+- check 문항은 반드시 앞선 concept/example에서 제시한 개념·코드 정보만으로 풀이 가능하게 구성
 - next_preview는 summary 섹션에만 작성하고, 나머지는 빈 문자열
 - 토픽/개인화 신호와 직접 연결된 설명 작성"""
     if retry_mode:

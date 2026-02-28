@@ -1,7 +1,31 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-export async function middleware(request: NextRequest) {
+interface AuthErrorShape {
+  code?: string;
+}
+
+function isRefreshTokenNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const row = error as AuthErrorShape;
+  return row.code === 'refresh_token_not_found';
+}
+
+function clearSupabaseAuthCookies(request: NextRequest, response: NextResponse): void {
+  const authCookieNames = request.cookies
+    .getAll()
+    .map((cookie) => cookie.name)
+    .filter((name) => name.startsWith('sb-') && name.includes('-auth-token'));
+
+  authCookieNames.forEach((name) => {
+    response.cookies.set(name, '', {
+      path: '/',
+      maxAge: 0,
+    });
+  });
+}
+
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -29,9 +53,19 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const {
+      data: { user: resolvedUser },
+    } = await supabase.auth.getUser();
+    user = resolvedUser;
+  } catch (error) {
+    if (isRefreshTokenNotFoundError(error)) {
+      clearSupabaseAuthCookies(request, supabaseResponse);
+    } else {
+      console.error('[proxy] supabase auth.getUser failed:', error);
+    }
+  }
 
   const { pathname } = request.nextUrl;
 

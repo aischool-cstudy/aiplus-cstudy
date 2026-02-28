@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getUserHistoryContents } from '@/actions/content';
 import { getUserCurriculums, getCurriculumItems } from '@/actions/curriculum';
+import { getDashboardSnapshot } from '@/actions/dashboard';
 import { TopBar } from '@/components/layout/top-bar';
 import { DashboardContent } from '@/components/features/dashboard/dashboard-content';
 
@@ -29,26 +29,8 @@ export default async function DashboardPage() {
     .eq('id', user.id)
     .single();
 
-  // 최근 콘텐츠 + 복습 우선순위 데이터
-  const historyContents = await getUserHistoryContents(user.id);
-  const recentContents = historyContents.slice(0, 3).map((item) => ({
-    id: item.id,
-    title: item.title,
-    language: item.language,
-    difficulty: item.difficulty,
-    created_at: item.created_at,
-  }));
-  const reviewCandidates = historyContents
-    .filter((item) => item.needs_review)
-    .sort((a, b) => b.review_score - a.review_score)
-    .slice(0, 5)
-    .map((item) => ({
-      id: item.id,
-      title: item.title,
-      review_score: item.review_score,
-      review_reason: item.review_reason,
-      review_factors: item.review_factors,
-    }));
+  // 최근 콘텐츠 + 복습 우선순위 데이터 (대시보드 전용 경량 스냅샷)
+  const dashboardSnapshot = await getDashboardSnapshot(user.id);
 
   // 활성 커리큘럼들
   const allCurriculums = await getUserCurriculums();
@@ -84,9 +66,9 @@ export default async function DashboardPage() {
       <DashboardContent
         profile={profile}
         learnerProfile={learnerProfile}
-        recentContents={recentContents}
+        recentContents={dashboardSnapshot.recentContents}
         curriculumStats={curriculumStats}
-        reviewCandidates={reviewCandidates}
+        reviewCandidates={dashboardSnapshot.reviewCandidates}
       />
     </>
   );

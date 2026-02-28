@@ -13,7 +13,7 @@ export default async function HistoryPage() {
 
   return (
     <>
-      <TopBar title="학습 기록" />
+      <TopBar title="학습 기록 허브" />
       <HistoryList contents={contents} />
     </>
   );

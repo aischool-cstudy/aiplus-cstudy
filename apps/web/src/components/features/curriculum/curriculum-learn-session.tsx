@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   generateCurriculumLearningContent,
   updateCurriculumItemStatus,
@@ -13,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Markdown } from '@/components/ui/markdown';
+import { PracticeRunner } from '@/components/features/learn/practice-runner';
 import {
   ArrowLeft,
   ArrowRight,
@@ -25,12 +25,14 @@ import {
   Lightbulb,
   Target,
   ListChecks,
+  ChevronDown,
   ChevronRight,
 } from 'lucide-react';
 import { TutorChat } from '@/components/features/chat/tutor-chat';
 import type { CurriculumItem, GeneratedContent, ContentSection, QuizQuestion } from '@/types';
 import { sanitizeQuizOptions } from '@/lib/quiz/options';
 import { inferLanguageFromGoalAndInterests } from '@/lib/curriculum/language';
+import { CLIENT_ACTION_TIMEOUT_MS, withTimeoutOrError } from '@/lib/runtime/timeout';
 
 interface CurriculumLearnSessionProps {
   curriculumId: string;
@@ -80,7 +82,6 @@ export function CurriculumLearnSession({
   totalItems,
   currentIndex,
 }: CurriculumLearnSessionProps) {
-  const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const currentContent: GeneratedContent | null = content;
   const [currentStep, setCurrentStep] = useState(0);
@@ -97,12 +98,30 @@ export function CurriculumLearnSession({
   const currentSection = sections[currentStep] || null;
   // v1 호환용: 구형 콘텐츠에서 퀴즈 추출
   const legacyQuiz = currentContent?.quiz as QuizQuestion[] | undefined;
+  const codeExamples = currentContent?.code_examples as {
+    title: string;
+    code: string;
+    explanation: string;
+  }[] | undefined;
+  const practiceEnabled = Boolean(
+    currentContent
+    && String(currentContent.language || '').trim().toLowerCase().includes('python')
+  );
+  const practiceInitialCode = codeExamples?.[0]?.code || '';
+  const [practiceExpanded, setPracticeExpanded] = useState(false);
+  const isExampleSection = currentSection?.type === 'example';
+  const shouldShowPractice = !isV2 || isExampleSection || practiceExpanded;
+
+  useEffect(() => {
+    if (!isV2) return;
+    setPracticeExpanded(false);
+  }, [currentStep, isV2]);
 
   // v2: 모든 check 섹션의 답변 상태
   const [checkAnswers, setCheckAnswers] = useState<Record<number, number>>({});
   const [checkSubmitted, setCheckSubmitted] = useState<Record<number, boolean>>({});
-  const [checkAttemptType, setCheckAttemptType] = useState<'full' | 'wrong_only' | 'variant'>('full');
-  const [checkVariantSeed, setCheckVariantSeed] = useState(0);
+  const checkAttemptType: 'full' = 'full';
+  const checkVariantSeed = 0;
   const [checkSummary, setCheckSummary] = useState<{
     total: number;
     correct: number;
@@ -118,6 +137,7 @@ export function CurriculumLearnSession({
   const [legacyVisibleIndexes, setLegacyVisibleIndexes] = useState<number[] | null>(null);
   const [feedbackRating, setFeedbackRating] = useState(3);
   const [feedbackConceptInput, setFeedbackConceptInput] = useState('');
+  const [feedbackExpanded, setFeedbackExpanded] = useState(false);
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -153,21 +173,36 @@ export function CurriculumLearnSession({
     if (generating) return;
     setGenerating(true);
     setSessionError(null);
-    const result = await generateCurriculumLearningContent({
-      itemId: item.id,
-      curriculumId,
-    });
+    try {
+      const result = await withTimeoutOrError(
+        generateCurriculumLearningContent({
+          itemId: item.id,
+          curriculumId,
+        }),
+        CLIENT_ACTION_TIMEOUT_MS,
+        new Error('client_action_timeout')
+      );
 
-    if (result.success) {
-      router.refresh();
-      return;
+      if (result.success) {
+        // router.refresh 지연으로 pending UI가 길게 유지되는 케이스를 피하기 위해 강제 새로고침 사용
+        window.location.reload();
+        return;
+      }
+
+      if (result.error) {
+        setSessionError(result.error);
+        return;
+      }
+      setSessionError('콘텐츠 생성 결과를 확인하지 못했습니다. 다시 시도해주세요.');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'client_action_timeout') {
+        setSessionError('요청 응답이 지연되고 있습니다. 생성이 완료됐을 수 있으니 페이지를 새로고침하거나 기록에서 확인해주세요.');
+      } else {
+        setSessionError('콘텐츠 생성 요청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      }
+    } finally {
+      setGenerating(false);
     }
-
-    if (result.error) {
-      setSessionError(result.error);
-    }
-
-    setGenerating(false);
   }
 
   // check 섹션 답변 제출
@@ -187,66 +222,6 @@ export function CurriculumLearnSession({
       return next;
     });
   }, []);
-
-  function handleRetryWrongChecks() {
-    const checkSections = sections
-      .map((section, idx) => ({ section, idx }))
-      .filter(({ section }) => section.type === 'check');
-    const wrongIndexes = checkSections
-      .filter(({ section, idx }) => checkAnswers[idx] !== section.correct_answer)
-      .map(({ idx }) => idx);
-
-    if (wrongIndexes.length === 0) return;
-
-    setCheckAttemptType('wrong_only');
-    setCompleted(false);
-    setCheckSummary(null);
-
-    setCheckSubmitted((prev) => {
-      const next = { ...prev };
-      for (const idx of wrongIndexes) {
-        delete next[idx];
-      }
-      return next;
-    });
-    setCheckAnswers((prev) => {
-      const next = { ...prev };
-      for (const idx of wrongIndexes) {
-        delete next[idx];
-      }
-      return next;
-    });
-    setCurrentStep(Math.min(...wrongIndexes));
-  }
-
-  function handleVariantChecks() {
-    const checkIndexes = sections
-      .map((section, idx) => ({ section, idx }))
-      .filter(({ section }) => section.type === 'check')
-      .map(({ idx }) => idx);
-    if (checkIndexes.length === 0) return;
-
-    setCheckAttemptType('variant');
-    setCompleted(false);
-    setCheckSummary(null);
-    setCheckVariantSeed((prev) => prev + 1);
-
-    setCheckSubmitted((prev) => {
-      const next = { ...prev };
-      for (const idx of checkIndexes) {
-        delete next[idx];
-      }
-      return next;
-    });
-    setCheckAnswers((prev) => {
-      const next = { ...prev };
-      for (const idx of checkIndexes) {
-        delete next[idx];
-      }
-      return next;
-    });
-    setCurrentStep(checkIndexes[0]);
-  }
 
   // 마지막 스텝 완료 처리
   async function handleComplete() {
@@ -271,6 +246,9 @@ export function CurriculumLearnSession({
       quizScore: score,
     });
     setCompleted(true);
+    setFeedbackExpanded(false);
+    setFeedbackSaved(false);
+    setFeedbackError(null);
     setCheckSummary({
       total: totalChecks,
       correct: correctChecks,
@@ -377,6 +355,7 @@ export function CurriculumLearnSession({
   async function handleSubmitFeedback() {
     if (!currentContent || feedbackSaving) return;
     setFeedbackSaving(true);
+    setFeedbackSaved(false);
     setFeedbackError(null);
     const difficultConcepts = feedbackConceptInput
       .split(',')
@@ -398,6 +377,7 @@ export function CurriculumLearnSession({
     }
 
     setFeedbackSaved(true);
+    setFeedbackExpanded(false);
     setFeedbackSaving(false);
   }
 
@@ -420,9 +400,6 @@ export function CurriculumLearnSession({
             {item.description && (
               <p className="text-muted-foreground mb-2">{item.description}</p>
             )}
-            <p className="text-sm text-muted-foreground mb-6">
-              AI가 학습 목표를 분석하고, 맞춤형 학습 콘텐츠를 설계합니다.
-            </p>
             <Button onClick={handleGenerate} loading={generating} size="lg">
               <Sparkles className="w-4 h-4 mr-2" />
               {generating ? 'AI가 콘텐츠를 설계하고 있습니다...' : '학습 시작하기'}
@@ -524,6 +501,44 @@ export function CurriculumLearnSession({
           />
         )}
 
+        {practiceEnabled && (
+          <div className="mt-5 border-t border-border/60 pt-4">
+            {!isExampleSection && (
+              <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">코드 실습</p>
+                    <p className="text-xs text-muted-foreground">
+                      필요할 때 열어서 직접 실행해보세요.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant={practiceExpanded ? 'secondary' : 'primary'}
+                    size="sm"
+                    aria-expanded={practiceExpanded}
+                    onClick={() => setPracticeExpanded(prev => !prev)}
+                  >
+                    <Code2 className="w-4 h-4 mr-1" />
+                    {practiceExpanded ? '코드 실습 닫기' : '코드 실습 열기'}
+                    {practiceExpanded ? (
+                      <ChevronDown className="w-4 h-4 ml-1" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className={shouldShowPractice ? '' : 'hidden'} aria-hidden={!shouldShowPractice}>
+              <PracticeRunner
+                problemId={currentContent.id}
+                initialCode={practiceInitialCode}
+              />
+            </div>
+          </div>
+        )}
+
         {/* 스텝 내비게이션 */}
         <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
           <Button
@@ -554,102 +569,96 @@ export function CurriculumLearnSession({
 
         {/* 토픽 간 내비게이션 */}
         {completed && (
-          <>
-            {checkSummary && (
-              <Card className="mt-4">
-                <CardHeader>
-                  <CardTitle className="text-base">이해도 점검 결과</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    {checkSummary.correct}/{checkSummary.total} 정답 · {checkSummary.total > 0 ? Math.round((checkSummary.correct / checkSummary.total) * 100) : 0}점
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {checkSummary.wrongIndexes.length > 0 && (
-                      <Button size="sm" variant="secondary" onClick={handleRetryWrongChecks}>
-                        오답만 다시 풀기
-                      </Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={handleVariantChecks}>
-                      변형 문제 다시 풀기
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            <Card className="mt-4">
-              <CardHeader>
-                <CardTitle className="text-base">학습 피드백</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-3">다음 콘텐츠 맞춤화를 위해 이해도와 어려웠던 개념을 남겨주세요.</p>
-                <div className="flex items-center gap-2 mb-3">
-                  {[1, 2, 3, 4, 5].map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setFeedbackRating(value)}
-                      className={`w-9 h-9 rounded-full border text-sm font-medium ${
-                        feedbackRating === value
-                          ? 'border-primary bg-primary text-white'
-                          : 'border-border hover:border-primary/40'
-                      }`}
-                    >
-                      {value}
-                    </button>
-                  ))}
-                  <span className="text-xs text-muted-foreground ml-1">이해도 (1=어려움, 5=쉬움)</span>
-                </div>
-                <input
-                  type="text"
-                  value={feedbackConceptInput}
-                  onChange={(e) => setFeedbackConceptInput(e.target.value)}
-                  placeholder="어려웠던 개념을 쉼표로 입력 (예: 클로저, 비동기 흐름)"
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-                <div className="mt-3 flex items-center gap-2">
-                  <Button onClick={handleSubmitFeedback} loading={feedbackSaving} size="sm">
-                    피드백 저장
-                  </Button>
-                  {feedbackSaved && <span className="text-xs text-success">저장됨</span>}
-                </div>
-                {feedbackError && (
-                  <p className="mt-2 text-xs text-error">{feedbackError}</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <div className="mt-4 pt-4 border-t border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="w-full sm:w-auto">
-                {prevItem ? (
-                  <Link href={`/curriculum/${curriculumId}/learn/${prevItem.id}`} className="block">
-                    <Button variant="ghost" className="w-full sm:w-auto sm:max-w-[360px]">
-                      <ArrowLeft className="w-4 h-4 mr-1 flex-shrink-0" />
-                      <span className="min-w-0 truncate">이전: {prevItem.title}</span>
-                    </Button>
-                  </Link>
-                ) : <div />}
-              </div>
-              <div className="w-full sm:w-auto sm:ml-auto">
+          <Card className="mt-4 border-border bg-background">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">학습 완료</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                다음 토픽으로 이동하거나, 선택적으로 피드백을 남겨주세요.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 {nextItem ? (
                   <Link href={`/curriculum/${curriculumId}/learn/${nextItem.id}`} className="block">
-                    <Button variant="primary" className="w-full sm:w-auto sm:max-w-[360px]">
+                    <Button
+                      size="md"
+                      variant="primary"
+                      className="w-full sm:w-auto sm:max-w-[420px]"
+                    >
                       <span className="min-w-0 truncate">다음: {nextItem.title}</span>
                       <ArrowRight className="w-4 h-4 ml-1 flex-shrink-0" />
                     </Button>
                   </Link>
                 ) : (
                   <Link href={`/curriculum/${curriculumId}`} className="block">
-                    <Button className="w-full sm:w-auto">
+                    <Button size="md" className="w-full sm:w-auto">
                       <CheckCircle2 className="w-4 h-4 mr-1" />
                       커리큘럼 완료!
                     </Button>
                   </Link>
                 )}
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  className="w-full sm:w-auto"
+                  aria-expanded={feedbackExpanded}
+                  onClick={() => setFeedbackExpanded(prev => !prev)}
+                >
+                  {feedbackExpanded ? '피드백 입력 닫기' : '피드백 남기기 (선택)'}
+                  {feedbackExpanded ? (
+                    <ChevronDown className="w-4 h-4 ml-1" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  )}
+                </Button>
               </div>
-            </div>
-          </>
+
+              {feedbackExpanded && (
+                <div className="rounded-xl border border-border bg-muted/30 p-4">
+                  <p className="text-sm text-muted-foreground mb-3">다음 콘텐츠 맞춤화를 위해 이해도와 어려웠던 개념을 남겨주세요.</p>
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    {[1, 2, 3, 4, 5].map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setFeedbackRating(value)}
+                        className={`w-9 h-9 rounded-full border text-sm font-medium ${
+                          feedbackRating === value
+                            ? 'border-primary bg-primary text-white'
+                            : 'border-border hover:border-primary/40'
+                        }`}
+                      >
+                        {value}
+                      </button>
+                    ))}
+                    <span className="text-xs text-muted-foreground ml-1">이해도 (1=어려움, 5=쉬움)</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={feedbackConceptInput}
+                    onChange={(e) => setFeedbackConceptInput(e.target.value)}
+                    placeholder="어려웠던 개념을 쉼표로 입력 (예: 클로저, 비동기 흐름)"
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                  <div className="mt-3 flex items-center gap-2">
+                    <Button onClick={handleSubmitFeedback} loading={feedbackSaving} size="sm">
+                      피드백 저장
+                    </Button>
+                    {feedbackSaved && <span className="text-xs text-success">저장됨</span>}
+                  </div>
+                  {feedbackError && (
+                    <p className="mt-2 text-xs text-error">{feedbackError}</p>
+                  )}
+                </div>
+              )}
+
+              {!feedbackExpanded && feedbackSaved && (
+                <p className="text-xs text-success">피드백이 저장되었습니다.</p>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {/* 튜터 챗 */}
@@ -704,12 +713,12 @@ export function CurriculumLearnSession({
           </div>
         </CardHeader>
         <CardContent>
-          <Markdown content={currentContent.content} />
+          <Markdown content={currentContent.content} className="mx-auto max-w-2xl" />
         </CardContent>
       </Card>
 
       {/* 코드 예제 */}
-      {currentContent.code_examples?.length > 0 && (
+      {codeExamples && codeExamples.length > 0 && (
         <Card className="mb-6">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -718,7 +727,7 @@ export function CurriculumLearnSession({
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {(currentContent.code_examples as { title: string; code: string; explanation: string }[]).map((ex, idx) => (
+            {codeExamples.map((ex, idx) => (
               <div key={idx}>
                 <h4 className="font-medium mb-2">{ex.title}</h4>
                 <pre className="bg-muted rounded-lg p-4 overflow-x-auto text-sm font-mono"><code>{ex.code}</code></pre>
@@ -727,6 +736,13 @@ export function CurriculumLearnSession({
             ))}
           </CardContent>
         </Card>
+      )}
+
+      {practiceEnabled && (
+        <PracticeRunner
+          problemId={currentContent.id}
+          initialCode={practiceInitialCode}
+        />
       )}
 
       {/* v1 퀴즈 */}
@@ -1112,7 +1128,7 @@ function SectionRenderer({
         {/* 본문 — body / explanation / 긴 title 중 하나라도 있으면 렌더 */}
         {body && (
           <div className={bgStyle[section.type] ? `rounded-lg p-4 ${bgStyle[section.type]}` : 'rounded-lg p-4 bg-muted/30'}>
-            <Markdown content={body} />
+            <Markdown content={body} className="mx-auto max-w-2xl" />
           </div>
         )}
 
@@ -1126,7 +1142,7 @@ function SectionRenderer({
         {/* 코드 예제 설명 (example 타입에서 code 아래 설명만 별도 표시) */}
         {explanation && section.type === 'example' && (
           <div className={`rounded-lg p-4 ${bgStyle.example}`}>
-            <Markdown content={explanation} />
+            <Markdown content={explanation} className="mx-auto max-w-2xl" />
           </div>
         )}
 

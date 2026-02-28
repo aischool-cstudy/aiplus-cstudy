@@ -8,9 +8,37 @@ interface MarkdownProps {
   className?: string;
 }
 
+function hasStructuredMarkdown(content: string): boolean {
+  return /```|(^|\n)\s*(#|[-*+]\s|\d+\.\s|>|\|)/m.test(content) || content.includes('\n\n');
+}
+
+function improvePlainTextReadability(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed || hasStructuredMarkdown(trimmed)) return trimmed;
+
+  // 번호 목록(1. 2. 3.)은 줄 분리해 가독성을 높인다.
+  const withListBreaks = trimmed.replace(/([^\n])\s+(?=\d+\.\s)/g, '$1\n');
+  if (withListBreaks.length < 220) return withListBreaks;
+
+  // 너무 긴 단일 문단은 2문장 단위 문단으로 자동 분리한다.
+  const sentences = withListBreaks
+    .split(/(?<=[^0-9][.!?])\s+/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (sentences.length < 4) return withListBreaks;
+
+  const paragraphs: string[] = [];
+  for (let idx = 0; idx < sentences.length; idx += 2) {
+    paragraphs.push(sentences.slice(idx, idx + 2).join(' '));
+  }
+  return paragraphs.join('\n\n');
+}
+
 export function Markdown({ content, className = '' }: MarkdownProps) {
+  const formatted = improvePlainTextReadability(content);
+
   return (
-    <div className={`prose prose-sm max-w-none dark:prose-invert ${className}`}>
+    <div className={`prose prose-sm md:prose-base max-w-none dark:prose-invert text-foreground/90 ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -60,7 +88,7 @@ export function Markdown({ content, className = '' }: MarkdownProps) {
           },
           // 단락
           p({ children }) {
-            return <p className="my-2 leading-relaxed">{children}</p>;
+            return <p className="my-3 leading-7 md:leading-8">{children}</p>;
           },
           // 강조
           strong({ children }) {
@@ -90,7 +118,7 @@ export function Markdown({ content, className = '' }: MarkdownProps) {
           },
         }}
       >
-        {content}
+        {formatted}
       </ReactMarkdown>
     </div>
   );

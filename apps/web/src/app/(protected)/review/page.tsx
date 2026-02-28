@@ -13,7 +13,7 @@ export default async function ReviewPage() {
 
   return (
     <>
-      <TopBar title="복습 세션" />
+      <TopBar title="오답 복습 세션" />
       <WrongReviewSession questions={questions} />
     </>
   );

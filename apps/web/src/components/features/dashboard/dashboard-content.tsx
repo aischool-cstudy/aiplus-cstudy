@@ -12,7 +12,6 @@ import {
   Clock,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { trackRecommendationEvent } from '@/lib/analytics/client-events';
@@ -63,6 +62,31 @@ interface CurriculumFocus {
   hasInProgress: boolean;
 }
 
+interface ManagerBrief {
+  badgeLabel: string;
+  badgeVariant: 'warning' | 'primary' | 'success';
+  title: string;
+  summary: string;
+  reasons: string[];
+  primaryHref: string;
+  primaryLabel: string;
+  secondaryHref?: string;
+  secondaryLabel?: string;
+}
+
+function linkButtonClass(params: { variant?: 'primary' | 'secondary'; size?: 'sm' | 'md' }): string {
+  const variant = params.variant || 'primary';
+  const size = params.size || 'md';
+  const base = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50';
+  const variantClass = variant === 'secondary'
+    ? 'bg-muted text-foreground hover:bg-border'
+    : 'bg-primary text-white hover:bg-primary-dark';
+  const sizeClass = size === 'sm'
+    ? 'px-3 py-1.5 text-sm'
+    : 'px-4 py-2 text-sm';
+  return `${base} ${variantClass} ${sizeClass}`;
+}
+
 function pickCurriculumFocus(curriculumStats: CurriculumStat[]): CurriculumFocus | null {
   const rows = curriculumStats
     .map((stat) => {
@@ -90,7 +114,7 @@ function pickCurriculumFocus(curriculumStats: CurriculumStat[]): CurriculumFocus
   return rows[0] || null;
 }
 
-function buildManagerBrief(topReview: ReviewCandidate | null, focus: CurriculumFocus | null, hasCurriculum: boolean) {
+function buildManagerBrief(topReview: ReviewCandidate | null, focus: CurriculumFocus | null, hasCurriculum: boolean): ManagerBrief {
   if (topReview && topReview.review_score >= 70) {
     return {
       badgeLabel: '복습 긴급',
@@ -101,7 +125,7 @@ function buildManagerBrief(topReview: ReviewCandidate | null, focus: CurriculumF
       primaryHref: `/history/${topReview.id}`,
       primaryLabel: '복습 시작',
       secondaryHref: '/history',
-      secondaryLabel: '복습 허브 보기',
+      secondaryLabel: '복습 허브로 이동',
     };
   }
 
@@ -118,7 +142,7 @@ function buildManagerBrief(topReview: ReviewCandidate | null, focus: CurriculumF
       primaryHref: `/curriculum/${focus.curriculumId}/learn/${focus.nextItem.id}`,
       primaryLabel: '이어서 학습',
       secondaryHref: `/curriculum/${focus.curriculumId}`,
-      secondaryLabel: '커리큘럼 보기',
+      secondaryLabel: '전체 계획 보기',
     };
   }
 
@@ -131,8 +155,6 @@ function buildManagerBrief(topReview: ReviewCandidate | null, focus: CurriculumF
       reasons: [],
       primaryHref: '/curriculum',
       primaryLabel: '커리큘럼 열기',
-      secondaryHref: '/curriculum/new',
-      secondaryLabel: '새 커리큘럼 만들기',
     };
   }
 
@@ -144,8 +166,6 @@ function buildManagerBrief(topReview: ReviewCandidate | null, focus: CurriculumF
     reasons: [],
     primaryHref: '/curriculum/new',
     primaryLabel: '커리큘럼 만들기',
-    secondaryHref: '/generate',
-    secondaryLabel: '문제 훈련 시작',
   };
 }
 
@@ -171,7 +191,7 @@ export function DashboardContent({
       targetId: managerBrief.primaryHref,
       payload: {
         primaryLabel: managerBrief.primaryLabel,
-        secondaryLabel: managerBrief.secondaryLabel,
+        secondaryLabel: managerBrief.secondaryLabel || null,
       },
     });
   }, [managerBrief.primaryHref, managerBrief.primaryLabel, managerBrief.secondaryLabel]);
@@ -202,7 +222,7 @@ export function DashboardContent({
               </div>
               <div>
                 <Badge variant={managerBrief.badgeVariant}>{managerBrief.badgeLabel}</Badge>
-                <CardTitle className="text-base mt-2">학습매니저 브리핑</CardTitle>
+                <CardTitle className="text-base mt-2">오늘의 추천 1개</CardTitle>
               </div>
             </div>
           </div>
@@ -217,9 +237,10 @@ export function DashboardContent({
               ))}
             </ul>
           )}
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <Link
               href={managerBrief.primaryHref}
+              className={linkButtonClass({ variant: 'primary', size: 'sm' })}
               onClick={() => {
                 trackRecommendationEvent({
                   surface: 'dashboard_brief',
@@ -230,27 +251,26 @@ export function DashboardContent({
                 });
               }}
             >
-              <Button size="sm">
-                {managerBrief.primaryLabel}
-                <ArrowRight className="w-4 h-4 ml-1" />
-              </Button>
+              {managerBrief.primaryLabel}
+              <ArrowRight className="w-4 h-4 ml-1" />
             </Link>
-            <Link
-              href={managerBrief.secondaryHref}
-              onClick={() => {
-                trackRecommendationEvent({
-                  surface: 'dashboard_brief',
-                  actionType: 'click',
-                  targetType: 'brief_secondary',
-                  targetId: managerBrief.secondaryHref,
-                  payload: { label: managerBrief.secondaryLabel },
-                });
-              }}
-            >
-              <Button size="sm" variant="secondary">
+            {managerBrief.secondaryHref && managerBrief.secondaryLabel && (
+              <Link
+                href={managerBrief.secondaryHref}
+                className="text-sm text-muted-foreground hover:text-foreground hover:underline underline-offset-4"
+                onClick={() => {
+                  trackRecommendationEvent({
+                    surface: 'dashboard_brief',
+                    actionType: 'click',
+                    targetType: 'brief_secondary',
+                    targetId: managerBrief.secondaryHref,
+                    payload: { label: managerBrief.secondaryLabel },
+                  });
+                }}
+              >
                 {managerBrief.secondaryLabel}
-              </Button>
-            </Link>
+              </Link>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -280,12 +300,18 @@ export function DashboardContent({
                       </p>
                     </div>
                     {nextItem ? (
-                      <Link href={`/curriculum/${curriculum.id}/learn/${nextItem.id}`}>
-                        <Button size="sm">이어하기</Button>
+                      <Link
+                        href={`/curriculum/${curriculum.id}/learn/${nextItem.id}`}
+                        className={linkButtonClass({ variant: 'primary', size: 'sm' })}
+                      >
+                        이어하기
                       </Link>
                     ) : (
-                      <Link href={`/curriculum/${curriculum.id}`}>
-                        <Button size="sm" variant="secondary">보기</Button>
+                      <Link
+                        href={`/curriculum/${curriculum.id}`}
+                        className={linkButtonClass({ variant: 'secondary', size: 'sm' })}
+                      >
+                        보기
                       </Link>
                     )}
                   </div>
@@ -312,11 +338,9 @@ export function DashboardContent({
               <p className="font-medium">맞춤 커리큘럼 만들기</p>
               <p className="text-sm text-muted-foreground">학습 목표를 입력하면 AI가 학습 순서를 설계합니다.</p>
             </div>
-            <Link href="/curriculum/new">
-              <Button>
-                <Plus className="w-4 h-4 mr-1" />
-                시작하기
-              </Button>
+            <Link href="/curriculum/new" className={linkButtonClass({ variant: 'primary', size: 'md' })}>
+              <Plus className="w-4 h-4 mr-1" />
+              시작하기
             </Link>
           </CardContent>
         </Card>

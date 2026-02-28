@@ -91,7 +91,9 @@ export function CurriculumList({ curriculums }: CurriculumListProps) {
                         </span>
                         <span className="flex items-center gap-1">
                           <BookOpen className="w-3 h-3" />
-                          {new Date(c.created_at).toLocaleDateString('ko-KR')}
+                          <time dateTime={c.created_at} suppressHydrationWarning>
+                            {new Date(c.created_at).toLocaleDateString('ko-KR')}
+                          </time>
                         </span>
                       </div>
                     </div>

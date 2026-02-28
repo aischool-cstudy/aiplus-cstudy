@@ -15,6 +15,8 @@ import {
   ArrowRight,
   CheckCircle2,
   XCircle,
+  ClipboardList,
+  Layers,
 } from 'lucide-react';
 import type { HistoryContentItem, QuizQuestion } from '@/types';
 import { DEFAULT_TEACHING_METHOD, getTeachingMethodLabel, normalizeTeachingMethod } from '@/lib/ai/teaching-methods';
@@ -30,9 +32,17 @@ const difficultyLabels: Record<string, string> = {
   advanced: '고급',
 };
 
+const contentKindLabels: Record<'lesson' | 'practice_set', string> = {
+  lesson: '학습 콘텐츠',
+  practice_set: '문제 세트',
+};
+
 export function ContentDetail({ content }: ContentDetailProps) {
   const quiz = content.quiz as QuizQuestion[] | undefined;
   const isPracticeSet = content.content_kind === 'practice_set';
+  const hasBody = Boolean(content.content?.trim());
+  const hasCodeExamples = Array.isArray(content.code_examples) && content.code_examples.length > 0;
+
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [quizScore, setQuizScore] = useState<number | null>(null);
@@ -104,9 +114,20 @@ export function ContentDetail({ content }: ContentDetailProps) {
     questionCount: String(Math.max(5, Math.min(12, quiz?.length || 8))),
   }).toString();
 
+  const sessionSummary = content.session_source === 'curriculum'
+    ? [
+      content.curriculum_title || '커리큘럼 학습',
+      content.curriculum_day_number ? `${content.curriculum_day_number}일차` : null,
+      content.curriculum_order_in_day ? `${content.curriculum_order_in_day}순서` : null,
+    ].filter(Boolean).join(' · ')
+    : '문제 훈련에서 단독 생성한 콘텐츠';
+
+  const reviewStatus = content.unresolved_wrong_count > 0
+    ? `오답 큐 ${content.unresolved_wrong_count}문항`
+    : '현재 오답 큐 없음';
+
   return (
     <div className="px-4 md:px-8 py-6 max-w-3xl">
-      {/* Back link */}
       <Link
         href="/history"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
@@ -115,11 +136,11 @@ export function ContentDetail({ content }: ContentDetailProps) {
         기록으로 돌아가기
       </Link>
 
-      {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-2">
           <Badge variant="primary">{content.language}</Badge>
           <Badge>{difficultyLabels[content.difficulty] || content.difficulty}</Badge>
+          <Badge>{contentKindLabels[isPracticeSet ? 'practice_set' : 'lesson']}</Badge>
           {content.teaching_method && (
             <Badge>{getTeachingMethodLabel(content.teaching_method)}</Badge>
           )}
@@ -133,13 +154,15 @@ export function ContentDetail({ content }: ContentDetailProps) {
           </p>
         )}
         <p className="text-xs text-muted-foreground mt-2">
-          {new Date(content.created_at).toLocaleDateString('ko-KR', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
+          <time dateTime={content.created_at} suppressHydrationWarning>
+            {new Date(content.created_at).toLocaleDateString('ko-KR', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </time>
         </p>
         {content.review_reason && (
           <p className="text-xs text-warning mt-2">{content.review_reason}</p>
@@ -151,33 +174,68 @@ export function ContentDetail({ content }: ContentDetailProps) {
         )}
       </div>
 
+      <Card className="mb-6 border-primary/20">
+        <CardContent className="py-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Layers className="w-4 h-4 text-primary" />
+            세션 맥락
+          </div>
+          <p className="text-sm text-muted-foreground">{sessionSummary}</p>
+          <p className="text-xs text-muted-foreground">{reviewStatus}</p>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-wrap gap-2 mb-6">
-        <Link href={`/generate?${regenerateQuery}`}>
-          <Button variant="secondary">
-            이 주제로 문제 세트 생성
-            <ArrowRight className="w-4 h-4 ml-1" />
-          </Button>
-        </Link>
+        {isPracticeSet ? (
+          <>
+            {content.unresolved_wrong_count > 0 && (
+              <Link href="/review">
+                <Button>
+                  오답 복습 시작
+                  <ArrowRight className="w-4 h-4 ml-1" />
+                </Button>
+              </Link>
+            )}
+            <Link href={`/generate?${regenerateQuery}`}>
+              <Button variant="secondary">
+                비슷한 문제 세트 다시 생성
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </Link>
+          </>
+        ) : (
+          <Link href={`/generate?${regenerateQuery}`}>
+            <Button variant="secondary">
+              이 주제로 문제 세트 생성
+              <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
+          </Link>
+        )}
+        {content.unresolved_wrong_count > 0 && !isPracticeSet && (
+          <Link href="/review">
+            <Button>오답 복습 세션 이동</Button>
+          </Link>
+        )}
         <Link href="/curriculum">
           <Button variant="ghost">커리큘럼에서 이어서 학습</Button>
         </Link>
       </div>
 
-      {/* Content */}
-      <Card className="mb-6">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-primary" />
-            <CardTitle className="text-base">학습 내용</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Markdown content={content.content} />
-        </CardContent>
-      </Card>
+      {!isPracticeSet && hasBody && (
+        <Card className="mb-6">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-primary" />
+              <CardTitle className="text-base">학습 내용</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Markdown content={content.content} />
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Code examples */}
-      {content.code_examples && content.code_examples.length > 0 && (
+      {!isPracticeSet && hasCodeExamples && (
         <Card className="mb-6">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -199,13 +257,26 @@ export function ContentDetail({ content }: ContentDetailProps) {
         </Card>
       )}
 
-      {/* Quiz */}
+      {isPracticeSet && hasBody && (
+        <Card className="mb-6">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-primary" />
+              <CardTitle className="text-base">문제 세트 안내</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Markdown content={content.content} />
+          </CardContent>
+        </Card>
+      )}
+
       {quiz && quiz.length > 0 && (
         <Card className="mb-6">
           <CardHeader>
             <div className="flex items-center gap-2">
               <HelpCircle className="w-5 h-5 text-primary" />
-              <CardTitle className="text-base">퀴즈</CardTitle>
+              <CardTitle className="text-base">{isPracticeSet ? '문제 풀이' : '퀴즈'}</CardTitle>
             </div>
           </CardHeader>
           <CardContent>
@@ -283,6 +354,14 @@ export function ContentDetail({ content }: ContentDetailProps) {
                   <Button onClick={handleRetryFullQuiz} variant="secondary" size="sm">
                     전체 다시 풀기
                   </Button>
+                  {latestWrongIndexes.length > 0 && (
+                    <Link href="/review">
+                      <Button size="sm">
+                        오답 복습 세션으로 이동
+                        <ArrowRight className="w-4 h-4 ml-1" />
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               </div>
             )}

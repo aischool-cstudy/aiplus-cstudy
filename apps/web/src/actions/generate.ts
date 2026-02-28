@@ -11,6 +11,7 @@ import {
 } from '@/lib/ai/errors';
 import { createAIGenerationTraceId } from '@/lib/ai/trace-id';
 import { QUIZ_QUESTION_COUNT } from '@/lib/constants/options';
+import { withTimeoutOrNull } from '@/lib/runtime/timeout';
 import { insertAIGenerationLog } from './ai-logs';
 
 export async function generateAndSaveContent(formData: FormData) {
@@ -176,14 +177,44 @@ export async function generateAndSaveContent(formData: FormData) {
     return { error: '콘텐츠 저장 결과를 확인하지 못했습니다.' };
   }
 
+  let topicLinked = true;
   // 토픽에 콘텐츠 연결 (topicId가 있으면) — RLS 우회 필요
   const topicId = formData.get('topicId') as string | null;
   if (topicId && saved.id) {
+    const topicLinkTimeoutRaw = Number(process.env.TOPIC_LINK_TIMEOUT_MS || 2500);
+    const topicLinkTimeoutMs = Number.isFinite(topicLinkTimeoutRaw)
+      ? Math.max(500, Math.round(topicLinkTimeoutRaw))
+      : 2500;
     const adminClient = createAdminClient();
-    await adminClient
-      .from('topics')
-      .update({ content_id: saved.id })
-      .eq('id', topicId);
+    const topicLinkPromise = Promise.resolve(
+      adminClient
+        .from('topics')
+        .update({ content_id: saved.id })
+        .eq('id', topicId)
+        .select('id')
+        .maybeSingle()
+    );
+    const topicLinkResult = await withTimeoutOrNull(topicLinkPromise, topicLinkTimeoutMs);
+    const linkedTopic = topicLinkResult?.data ?? null;
+    const topicLinkError = topicLinkResult?.error ?? null;
+
+    if (!topicLinkResult || topicLinkError || !linkedTopic?.id) {
+      topicLinked = false;
+      await insertAIGenerationLog(supabase, {
+        userId: user.id,
+        pipeline: 'content_generate',
+        stage: 'link_topic',
+        status: 'failed',
+        traceId,
+        errorCode: 'db_error',
+        errorMessage: topicLinkError?.message || (!topicLinkResult ? 'topic_link_timeout' : 'topic_link_target_not_found'),
+        metadata: {
+          topicId,
+          contentId: saved.id,
+          timeoutMs: topicLinkTimeoutMs,
+        },
+      });
+    }
   }
 
   await insertAIGenerationLog(supabase, {
@@ -197,8 +228,9 @@ export async function generateAndSaveContent(formData: FormData) {
       contentId: saved.id,
       topicId: topicId || null,
       contentMode,
+      topicLinked,
     },
   });
 
-  return { success: true, contentId: saved.id };
+  return { success: true, contentId: saved.id, topicLinked };
 }

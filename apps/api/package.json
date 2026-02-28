@@ -7,6 +7,7 @@
     "build": "python3 -m compileall -q app",
     "lint": "python3 -m compileall -q app",
     "typecheck": "python3 -m compileall -q app",
-    "test": "bash -lc 'PY=.venv/bin/python; if [ ! -x \"$PY\" ]; then PY=python3; fi; $PY -m compileall -q app && if $PY -m pytest --version >/dev/null 2>&1; then $PY -m pytest -q; else $PY -m unittest discover -s tests -p \"test_*.py\"; fi'"
+    "test": "bash -lc 'PY=.venv/bin/python; if [ ! -x \"$PY\" ]; then PY=python3; fi; $PY -m compileall -q app && if $PY -m pytest --version >/dev/null 2>&1; then $PY -m pytest -q; else $PY -m unittest discover -s tests -p \"test_*.py\"; fi'",
+    "quality:report": "bash -lc 'PY=.venv/bin/python; if [ ! -x \"$PY\" ]; then PY=python3; fi; PYTHONPATH=. $PY -m tests.quality_eval_report'"
   }
 }

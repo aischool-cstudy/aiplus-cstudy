@@ -218,6 +218,94 @@ class CompatGenerateServiceTests(unittest.TestCase):
         self.assertIn("example_missing", issues)
         self.assertIn("check_count_lt_2", issues)
 
+    def test_sections_quality_issues_detects_check_grounding_low(self) -> None:
+        payload = gs.ReasoningRequest(
+            topic="파이썬 리스트",
+            curriculumGoal="웹 서비스 백엔드 개발",
+            learnerLevel="beginner",
+            language="Python",
+        )
+        issues = gs._sections_quality_issues(
+            {
+                "title": "리스트 학습 세션",
+                "sections": [
+                    {
+                        "type": "concept",
+                        "title": "리스트 시간 복잡도 핵심",
+                        "body": (
+                            "리스트는 동적 배열 기반이라 append는 평균 O(1)로 빠르게 동작합니다. "
+                            "반면 insert(0, x)는 앞쪽 삽입 시 기존 요소를 뒤로 밀어야 하므로 O(n) 비용이 발생합니다. "
+                            "데이터가 많아질수록 이 차이가 누적되어 실행 시간에 큰 영향을 줍니다."
+                        ),
+                        "code": "",
+                        "explanation": "개념을 기준으로 예제 코드를 해석하세요.",
+                        "question": "",
+                        "options": [],
+                        "correct_answer": 0,
+                        "next_preview": "",
+                    },
+                    {
+                        "type": "example",
+                        "title": "append와 insert 비교 예제",
+                        "body": "append와 insert(0, x)의 동작 차이를 코드로 확인합니다.",
+                        "code": (
+                            "numbers = [1, 2, 3]\n"
+                            "numbers.append(4)\n"
+                            "numbers.insert(0, 0)\n"
+                            "for value in numbers:\n"
+                            "    print(value)\n"
+                            "print(len(numbers))\n"
+                        ),
+                        "explanation": (
+                            "append는 끝에 값을 추가하고, insert(0, x)는 앞 삽입으로 기존 값을 이동시킵니다. "
+                            "예제 결과를 보면 두 방식의 처리 순서가 다르게 나타납니다."
+                        ),
+                        "question": "",
+                        "options": [],
+                        "correct_answer": 0,
+                        "next_preview": "",
+                    },
+                    {
+                        "type": "check",
+                        "title": "이해도 확인 1",
+                        "body": "",
+                        "code": "",
+                        "explanation": "HTTP 상태 코드는 응답 의미를 구분할 때 중요하며, 상황에 맞는 분류 기준을 이해해야 합니다.",
+                        "question": "HTTP 상태 코드 분류에서 4xx가 의미하는 범주를 가장 정확히 설명한 것은 무엇인가요?",
+                        "options": ["클라이언트 요청 오류", "서버 내부 성공", "캐시 저장 완료", "네트워크 전원 상태"],
+                        "correct_answer": 0,
+                        "next_preview": "",
+                    },
+                    {
+                        "type": "check",
+                        "title": "이해도 확인 2",
+                        "body": "",
+                        "code": "",
+                        "explanation": "트랜잭션 격리 수준은 동시성 이상 현상을 줄이기 위해 사용되며 각 단계의 목적을 이해해야 합니다.",
+                        "question": "데이터베이스 트랜잭션에서 격리 수준을 높일 때 일반적으로 함께 증가하는 것은 무엇인가요?",
+                        "options": ["동시성 제어 비용", "리스트 append 속도", "문자열 길이", "브라우저 렌더링"],
+                        "correct_answer": 0,
+                        "next_preview": "",
+                    },
+                    {
+                        "type": "summary",
+                        "title": "요약",
+                        "body": "다음 토픽으로 넘어갑니다.",
+                        "code": "",
+                        "explanation": "",
+                        "question": "",
+                        "options": [],
+                        "correct_answer": 0,
+                        "next_preview": "다음 학습으로 이동",
+                    },
+                ],
+            },
+            payload,
+        )
+
+        self.assertIn("check1_grounding_low", issues)
+        self.assertIn("check2_grounding_low", issues)
+
     def test_classify_ai_failure_maps_timeout_and_rate_limit(self) -> None:
         timeout_kind, timeout_status, timeout_retryable = gs._classify_ai_failure("request timed out")
         self.assertEqual((timeout_kind, timeout_status, timeout_retryable), ("timeout", 504, True))

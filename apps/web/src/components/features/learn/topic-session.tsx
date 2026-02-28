@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Markdown } from '@/components/ui/markdown';
 import { DEFAULT_TEACHING_METHOD, getTeachingMethodLabel, normalizeTeachingMethod } from '@/lib/ai/teaching-methods';
 import { sanitizeQuizOptions } from '@/lib/quiz/options';
+import { CLIENT_ACTION_TIMEOUT_MS, withTimeoutOrError } from '@/lib/runtime/timeout';
 import {
   ArrowRight,
   CheckCircle2,
@@ -52,34 +53,63 @@ export function TopicSession({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const quiz = generatedContent?.quiz as QuizQuestion[] | undefined;
+  const codeExamples = generatedContent?.code_examples as {
+    title: string;
+    code: string;
+    explanation: string;
+    language: string;
+  }[] | undefined;
 
   async function handleGenerate() {
+    if (generating) return;
     setGenerating(true);
     setActionError(null);
-    const language = learnerInterests[0] || 'Python';
-    const difficulty = learnerLevel || 'beginner';
-    const audienceMap: Record<string, string> = {
-      beginner: '프로그래밍 초보자',
-      intermediate: '프로그래밍 기본기를 갖춘 중급 학습자',
-      advanced: '실무 경험이 있는 개발자',
-    };
 
-    const formData = new FormData();
-    formData.set('language', language);
-    formData.set('topic', topic.title);
-    formData.set('difficulty', difficulty);
-    formData.set('targetAudience', audienceMap[difficulty] || '프로그래밍 학습자');
-    formData.set('teachingMethod', normalizeTeachingMethod(learnerPreferredTeachingMethod || DEFAULT_TEACHING_METHOD));
-    formData.set('topicId', topic.id);
+    try {
+      const language = learnerInterests[0] || 'Python';
+      const difficulty = learnerLevel || 'beginner';
+      const audienceMap: Record<string, string> = {
+        beginner: '프로그래밍 초보자',
+        intermediate: '프로그래밍 기본기를 갖춘 중급 학습자',
+        advanced: '실무 경험이 있는 개발자',
+      };
 
-    const result = await generateAndSaveContent(formData);
-    if (result.contentId) {
-      // 페이지를 리로드하여 새 콘텐츠 반영
-      window.location.reload();
-    } else if (result.error) {
-      setActionError(result.error);
+      const formData = new FormData();
+      formData.set('language', language);
+      formData.set('topic', topic.title);
+      formData.set('difficulty', difficulty);
+      formData.set('targetAudience', audienceMap[difficulty] || '프로그래밍 학습자');
+      formData.set('teachingMethod', normalizeTeachingMethod(learnerPreferredTeachingMethod || DEFAULT_TEACHING_METHOD));
+      formData.set('topicId', topic.id);
+
+      const result = await withTimeoutOrError(
+        generateAndSaveContent(formData),
+        CLIENT_ACTION_TIMEOUT_MS,
+        new Error('client_action_timeout')
+      );
+      if (result.contentId) {
+        if ('topicLinked' in result && result.topicLinked === false) {
+          window.location.href = `/history/${result.contentId}`;
+          return;
+        }
+        // 페이지를 리로드하여 새 콘텐츠 반영
+        window.location.reload();
+        return;
+      }
+      if (result.error) {
+        setActionError(result.error);
+        return;
+      }
+      setActionError('콘텐츠 생성 결과를 확인하지 못했습니다. 다시 시도해주세요.');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'client_action_timeout') {
+        setActionError('요청 응답이 지연되고 있습니다. 생성이 완료됐을 수 있으니 기록에서 먼저 확인해주세요.');
+      } else {
+        setActionError('콘텐츠 생성 요청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      }
+    } finally {
+      setGenerating(false);
     }
-    setGenerating(false);
   }
 
   async function handleStartLearning() {
@@ -206,7 +236,7 @@ export function TopicSession({
       </Card>
 
       {/* Code examples */}
-      {generatedContent.code_examples && generatedContent.code_examples.length > 0 && (
+      {codeExamples && codeExamples.length > 0 && (
         <Card className="mb-6">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -215,7 +245,7 @@ export function TopicSession({
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {(generatedContent.code_examples as { title: string; code: string; explanation: string; language: string }[]).map((example, idx) => (
+            {codeExamples.map((example, idx) => (
               <div key={idx}>
                 <h4 className="font-medium mb-2">{example.title}</h4>
                 <pre className="bg-muted rounded-lg p-4 overflow-x-auto text-sm font-mono">

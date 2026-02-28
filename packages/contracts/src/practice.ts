@@ -1,30 +1,21 @@
-export type PracticeLanguage = "python" | "javascript" | "typescript" | "java" | "go" | "rust";
-export type PracticeState = "ready" | "running" | "failed" | "completed";
+export type PracticeErrorCode =
+  | "schema_mismatch"
+  | "timeout"
+  | "internal_error"
+  | "unknown";
 
-export interface PracticeSessionDto {
-  session_id: string;
-  topic: string;
-  language: PracticeLanguage;
-  template_id: string | null;
-  state: PracticeState;
-  provider: string;
-  message: string;
+export interface PracticeRunRequest {
+  problem_id: string;
+  code: string;
 }
 
-export interface PracticeRunDto {
-  success: boolean;
-  state: PracticeState;
+export interface PracticeRunResponse {
+  passed: boolean;
   stdout: string;
   stderr: string;
-  message: string;
-  provider: string;
 }
 
-export interface PracticeSubmitDto {
-  accepted: boolean;
-  state: PracticeState;
-  score: number;
-  feedback: string;
-  retryable: boolean;
-  provider: string;
+export interface PracticeErrorResponse {
+  error_code: PracticeErrorCode;
+  message: string;
 }

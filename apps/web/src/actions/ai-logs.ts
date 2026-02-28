@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { classifyAIGenerationError, type AIGenerationErrorCode } from '@/lib/ai/errors';
 import type { AICallMeta } from '@/lib/ai/schemas';
 import { logger } from '@/lib/observability/logger';
+import { withTimeoutOrNull } from '@/lib/runtime/timeout';
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -36,6 +37,8 @@ export async function insertAIGenerationLog(
   supabase: SupabaseServerClient,
   input: AIGenerationLogInput
 ) {
+  const timeoutMsRaw = Number(process.env.AI_LOG_INSERT_TIMEOUT_MS || 1500);
+  const timeoutMs = Number.isFinite(timeoutMsRaw) ? Math.max(300, Math.round(timeoutMsRaw)) : 1500;
   const resolvedCode = input.errorCode
     || (
       input.status === 'failed'
@@ -70,18 +73,29 @@ export async function insertAIGenerationLog(
     ...(input.metadata || {}),
   };
 
-  const { error } = await supabase
-    .from('ai_generation_logs')
-    .insert({
-      user_id: input.userId,
-      pipeline: input.pipeline,
-      stage: input.stage,
-      status: input.status,
-      error_code: resolvedCode,
-      error_message: input.errorMessage || null,
-      latency_ms: typeof input.latencyMs === 'number' ? Math.max(0, Math.round(input.latencyMs)) : null,
-      metadata,
-    });
+  const insertPromise = Promise.resolve(
+    supabase
+      .from('ai_generation_logs')
+      .insert({
+        user_id: input.userId,
+        pipeline: input.pipeline,
+        stage: input.stage,
+        status: input.status,
+        error_code: resolvedCode,
+        error_message: input.errorMessage || null,
+        latency_ms: typeof input.latencyMs === 'number' ? Math.max(0, Math.round(input.latencyMs)) : null,
+        metadata,
+      })
+  );
+
+  const insertResult = await withTimeoutOrNull(insertPromise, timeoutMs);
+
+  if (!insertResult) {
+    logger.warn('[ai_generation_logs] insert timeout');
+    return;
+  }
+
+  const { error } = insertResult;
 
   if (error && error.message.includes('ai_generation_logs')) {
     // 마이그레이션 적용 전 하위 호환

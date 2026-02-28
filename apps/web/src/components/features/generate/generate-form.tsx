@@ -1,7 +1,6 @@
 'use client';
 
 import { FormEvent, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { generateAndSaveContent } from '@/actions/generate';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +8,7 @@ import { Select } from '@/components/ui/select';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Sparkles, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import { TEACHING_METHOD_OPTIONS, DEFAULT_TEACHING_METHOD, normalizeTeachingMethod } from '@/lib/ai/teaching-methods';
+import { CLIENT_ACTION_TIMEOUT_MS, withTimeoutOrError } from '@/lib/runtime/timeout';
 import {
   DIFFICULTY_OPTIONS,
   LANGUAGE_OPTIONS,
@@ -28,7 +28,6 @@ interface GenerateFormProps {
 }
 
 export function GenerateForm({ initialValues, preferredTeachingMethod }: GenerateFormProps) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState(initialValues?.language || 'Python');
@@ -59,26 +58,30 @@ export function GenerateForm({ initialValues, preferredTeachingMethod }: Generat
 
     try {
       const formData = new FormData(event.currentTarget);
-      const result = await generateAndSaveContent(formData);
+      const result = await withTimeoutOrError(
+        generateAndSaveContent(formData),
+        CLIENT_ACTION_TIMEOUT_MS,
+        new Error('client_action_timeout')
+      );
 
       if (result.error) {
         setError(result.error);
-        setLoading(false);
-        submitLockRef.current = false;
         return;
       }
 
       if (result.contentId) {
-        router.replace(`/history/${result.contentId}`);
-        router.refresh();
+        window.location.href = `/history/${result.contentId}`;
         return;
       }
 
       setError('생성은 완료됐지만 결과 페이지로 이동하지 못했습니다. 다시 시도해주세요.');
-      setLoading(false);
-      submitLockRef.current = false;
-    } catch {
-      setError('문제 세트 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'client_action_timeout') {
+        setError('요청 응답이 지연되고 있습니다. 생성이 완료됐을 수 있으니 기록에서 먼저 확인해주세요.');
+      } else {
+        setError('문제 세트 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      }
+    } finally {
       setLoading(false);
       submitLockRef.current = false;
     }

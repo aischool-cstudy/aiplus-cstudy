@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   Sparkles,
   Clock,
-  RotateCcw,
   Settings,
   GraduationCap,
   Target,
@@ -22,7 +21,6 @@ const navItems = [
   { label: '커리큘럼', href: '/curriculum', icon: Target },
   { label: '문제 훈련', href: '/generate', icon: Sparkles },
   { label: '기록', href: '/history', icon: Clock },
-  { label: '복습', href: '/review', icon: RotateCcw },
   { label: '설정', href: '/settings', icon: Settings },
 ];
 
@@ -55,8 +53,10 @@ export function Header() {
           <nav>
             <ul className="space-y-1">
               {navItems.map((item) => {
-                const isActive =
-                  pathname === item.href || pathname.startsWith(item.href + '/');
+                const isHistory = item.href === '/history';
+                const isActive = isHistory
+                  ? pathname === '/history' || pathname.startsWith('/history/') || pathname.startsWith('/review')
+                  : pathname === item.href || pathname.startsWith(item.href + '/');
                 const Icon = item.icon;
 
                 return (

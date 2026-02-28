@@ -148,6 +148,11 @@ export interface HistoryContentItem extends GeneratedContent {
   last_studied_at: string | null;
   last_assessment_at: string | null;
   last_assessment_type: 'full' | 'wrong_only' | 'variant' | null;
+  session_source: 'curriculum' | 'standalone';
+  curriculum_id: string | null;
+  curriculum_title: string | null;
+  curriculum_day_number: number | null;
+  curriculum_order_in_day: number | null;
   unresolved_wrong_count: number;
   unresolved_wrong_indexes: number[];
   needs_review: boolean;
