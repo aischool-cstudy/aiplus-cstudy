@@ -11,8 +11,10 @@ COPY packages/contracts/index.d.ts   ./packages/contracts/
 COPY apps/web/package.json           ./apps/web/
 RUN npm install --workspaces --include-workspace-root
 
+ENV PATH="/app/node_modules/.bin:${PATH}"
+
 EXPOSE 3000
 
 # apps/web 위치에서 next dev 실행 (0.0.0.0 바인딩 필수)
 WORKDIR /app/apps/web
-CMD ["bash", "-lc", "next dev --webpack --hostname 0.0.0.0"]
+CMD ["/app/node_modules/.bin/next", "dev", "--webpack", "--hostname", "0.0.0.0"]
