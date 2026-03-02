@@ -1,13 +1,28 @@
-node_modules
-.pnpm-store
-.next
-.turbo
+# ── 환경변수 ────────────────────────────────────────────────────
 .env
-.env.*
-__pycache__
-*.pyc
-.venv
-dist
-coverage
+.env.local
+.env.*.local
+
+# ── Node ────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.turbo/
+dist/
+.next/
+coverage/
+.test-dist/
+
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
 *.egg-info/
-.test-dist
+.venv/
+
+# ── OS ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ─────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp

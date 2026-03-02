@@ -65,17 +65,16 @@ function clearSession() {
   try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
 }
 
-function getInitialWizardState(defaultTeachingMethod: string, initialGoal: string) {
-  const saved = typeof window !== 'undefined' ? loadFromSession() : null;
-  const teachingMethod = normalizeTeachingMethod((saved?.teachingMethod as string) || defaultTeachingMethod);
+function getDefaultWizardState(defaultTeachingMethod: string, initialGoal: string) {
+  const teachingMethod = normalizeTeachingMethod(defaultTeachingMethod);
   return {
-    step: (saved?.step as WizardStep) || 'goal',
-    goal: (saved?.goal as string) || initialGoal || '',
-    questions: (saved?.questions as AssessmentQuestion[]) || [],
-    answers: (saved?.answers as Record<number, number>) || {},
-    assessmentResult: (saved?.assessmentResult as AssessmentResult | null) || null,
-    curriculum: (saved?.curriculum as CurriculumData | null) || null,
-    dailyMinutes: (saved?.dailyMinutes as number) || 60,
+    step: 'goal' as WizardStep,
+    goal: initialGoal || '',
+    questions: [] as AssessmentQuestion[],
+    answers: {} as Record<number, number>,
+    assessmentResult: null as AssessmentResult | null,
+    curriculum: null as CurriculumData | null,
+    dailyMinutes: 60,
     teachingMethod,
   };
 }
@@ -89,11 +88,12 @@ export function CurriculumWizard({
   defaultTeachingMethod = DEFAULT_TEACHING_METHOD,
   initialGoal = '',
 }: CurriculumWizardProps) {
-  const [initial] = useState(() => getInitialWizardState(defaultTeachingMethod, initialGoal));
+  const [initial] = useState(() => getDefaultWizardState(defaultTeachingMethod, initialGoal));
   const router = useRouter();
   const [step, setStep] = useState<WizardStep>(initial.step);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasRestoredSession, setHasRestoredSession] = useState(false);
 
   // Step data
   const [goal, setGoal] = useState(initial.goal);
@@ -104,14 +104,32 @@ export function CurriculumWizard({
   const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [dailyMinutes, setDailyMinutes] = useState(initial.dailyMinutes);
-  const teachingMethod = initial.teachingMethod;
+  const [teachingMethod, setTeachingMethod] = useState(initial.teachingMethod);
+
+  useEffect(() => {
+    const saved = loadFromSession();
+    if (saved) {
+      const validSteps: WizardStep[] = ['goal', 'assessment', 'assessment-result', 'curriculum', 'refine', 'schedule', 'done'];
+      const savedStep = saved.step as WizardStep;
+      if (validSteps.includes(savedStep)) setStep(savedStep);
+      setGoal((saved.goal as string) || initialGoal || '');
+      setQuestions((saved.questions as AssessmentQuestion[]) || []);
+      setAnswers((saved.answers as Record<number, number>) || {});
+      setAssessmentResult((saved.assessmentResult as AssessmentResult | null) || null);
+      setCurriculum((saved.curriculum as CurriculumData | null) || null);
+      setDailyMinutes((saved.dailyMinutes as number) || 60);
+      setTeachingMethod(normalizeTeachingMethod((saved.teachingMethod as string) || defaultTeachingMethod));
+    }
+    setHasRestoredSession(true);
+  }, [defaultTeachingMethod, initialGoal]);
 
   // 상태 변경 시 세션 저장
   useEffect(() => {
+    if (!hasRestoredSession) return;
     if (step !== 'goal' || goal) {
       saveToSession({ step, goal, questions, answers, assessmentResult, curriculum, dailyMinutes, teachingMethod });
     }
-  }, [step, goal, questions, answers, assessmentResult, curriculum, dailyMinutes, teachingMethod]);
+  }, [hasRestoredSession, step, goal, questions, answers, assessmentResult, curriculum, dailyMinutes, teachingMethod]);
 
   // Step 1: 목표 입력 → 진단 질문 생성
   async function handleGoalSubmit() {

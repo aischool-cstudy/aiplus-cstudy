@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+LABEL description="AI+ Study Platform — FastAPI Backend"
+
+WORKDIR /app
+
+# 시스템 의존성
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 의존성 설치
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
+        "fastapi>=0.116.0,<1.0.0" \
+        "uvicorn[standard]>=0.30.0,<1.0.0" \
+        "pydantic-settings>=2.5.2,<3.0.0" \
+        "python-dotenv>=1.0.1,<2.0.0"
+
+# 소스 복사
+COPY app/ ./app/
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

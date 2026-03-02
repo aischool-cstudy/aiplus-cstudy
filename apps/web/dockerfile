@@ -1,0 +1,65 @@
+FROM node:20-alpine AS base
+
+# ────────────────────────────────────────────────
+# Stage 1: 의존성 설치
+# ────────────────────────────────────────────────
+FROM base AS deps
+WORKDIR /app
+
+# 워크스페이스 루트 및 패키지 매니페스트 복사
+COPY package.json ./
+COPY packages/contracts/package.json ./packages/contracts/
+COPY packages/contracts/index.js     ./packages/contracts/
+COPY packages/contracts/index.d.ts   ./packages/contracts/
+COPY apps/web/package.json           ./apps/web/
+
+# 모든 의존성 설치 (루트 node_modules에 호이스팅됨)
+RUN npm install --workspaces --include-workspace-root
+
+# ────────────────────────────────────────────────
+# Stage 2: 빌드
+# ────────────────────────────────────────────────
+FROM base AS builder
+WORKDIR /app
+
+# 루트 node_modules 복사 (next, pg 등 모두 여기 있음)
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages     ./packages
+
+# 웹 소스 복사
+COPY apps/web/ ./apps/web/
+
+# 루트 node_modules/.bin을 PATH에 추가
+ENV PATH="/app/node_modules/.bin:${PATH}"
+
+WORKDIR /app/apps/web
+
+# next build (webpack 강제, 환경변수는 런타임에 주입)
+RUN next build --webpack
+
+# ────────────────────────────────────────────────
+# Stage 3: 프로덕션 런타임
+# ────────────────────────────────────────────────
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PATH="/app/node_modules/.bin:${PATH}"
+
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser  --system --uid 1001 nextjs
+
+# 빌드 산출물 + 런타임 의존성 복사
+COPY --from=builder --chown=nextjs:nodejs \
+     /app/apps/web/.next                           ./.next
+COPY --from=builder /app/node_modules              ./node_modules
+COPY --from=builder /app/apps/web/package.json     ./package.json
+COPY --from=builder /app/apps/web/next.config.ts   ./next.config.ts
+
+USER nextjs
+
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+CMD ["next", "start"]

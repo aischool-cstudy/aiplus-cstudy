@@ -1,109 +1,70 @@
-import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { jwtVerify } from 'jose';
 
-interface AuthErrorShape {
-  code?: string;
+const COOKIE_NAME = 'auth-token';
+
+function getJwtSecret(): Uint8Array {
+  return new TextEncoder().encode(
+    process.env.JWT_SECRET || 'local-dev-secret-change-in-production'
+  );
 }
 
-function isRefreshTokenNotFoundError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const row = error as AuthErrorShape;
-  return row.code === 'refresh_token_not_found';
-}
-
-function clearSupabaseAuthCookies(request: NextRequest, response: NextResponse): void {
-  const authCookieNames = request.cookies
-    .getAll()
-    .map((cookie) => cookie.name)
-    .filter((name) => name.startsWith('sb-') && name.includes('-auth-token'));
-
-  authCookieNames.forEach((name) => {
-    response.cookies.set(name, '', {
-      path: '/',
-      maxAge: 0,
-    });
-  });
+async function getUser(request: NextRequest): Promise<{ id: string; email: string } | null> {
+  const token = request.cookies.get(COOKIE_NAME)?.value;
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecret());
+    const sub   = payload.sub;
+    const email = payload.email as string | undefined;
+    if (!sub || !email) return null;
+    return { id: sub, email };
+  } catch {
+    return null;
+  }
 }
 
 export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          supabaseResponse = NextResponse.next({
-            request,
-          });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  let user = null;
-  try {
-    const {
-      data: { user: resolvedUser },
-    } = await supabase.auth.getUser();
-    user = resolvedUser;
-  } catch (error) {
-    if (isRefreshTokenNotFoundError(error)) {
-      clearSupabaseAuthCookies(request, supabaseResponse);
-    } else {
-      console.error('[proxy] supabase auth.getUser failed:', error);
-    }
-  }
-
   const { pathname } = request.nextUrl;
 
-  // Protected routes: redirect to login if not authenticated
-  if (
-    !user &&
-    (pathname.startsWith('/dashboard') ||
-      pathname.startsWith('/onboarding') ||
-      pathname.startsWith('/learn') ||
-      pathname.startsWith('/generate') ||
-      pathname.startsWith('/history') ||
-      pathname.startsWith('/review') ||
-      pathname.startsWith('/settings'))
-  ) {
+  const user = await getUser(request);
+
+  // 인증이 필요한 보호 경로
+  const isProtected =
+    pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/curriculum') ||
+    pathname.startsWith('/onboarding') ||
+    pathname.startsWith('/generate') ||
+    pathname.startsWith('/history') ||
+    pathname.startsWith('/review') ||
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/ops') ||
+    pathname.startsWith('/start');
+
+  if (!user && isProtected) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // If logged in and trying to access auth pages, redirect to dashboard
+  // 이미 로그인 상태에서 auth 페이지 접근 시 대시보드로 리다이렉트
   if (user && (pathname === '/login' || pathname === '/register')) {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
     return NextResponse.redirect(url);
   }
 
-  // 학습 메뉴 제거: /learn 접근 시 커리큘럼으로 리다이렉트
+  // /learn → /curriculum 리다이렉트 (학습 메뉴 제거)
   if (pathname.startsWith('/learn')) {
     const url = request.nextUrl.clone();
     url.pathname = '/curriculum';
     return NextResponse.redirect(url);
   }
 
-  return supabaseResponse;
+  return NextResponse.next({ request });
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
