@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aiplus-api"
+version = "0.0.1"
+description = "AI+ learning platform FastAPI service"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0,<1.0.0",
+  "uvicorn[standard]>=0.30.0,<1.0.0",
+  "pydantic-settings>=2.5.2,<3.0.0",
+  "python-dotenv>=1.0.1,<2.0.0"
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

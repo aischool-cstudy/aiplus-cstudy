@@ -1,0 +1,18 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+# workspace 매니페스트 + contracts 정적 파일만 복사 후 설치
+# (소스는 볼륨으로 마운트되므로 node_modules만 이미지에 구워둠)
+COPY package.json ./
+COPY packages/contracts/package.json ./packages/contracts/
+COPY packages/contracts/index.js     ./packages/contracts/
+COPY packages/contracts/index.d.ts   ./packages/contracts/
+COPY apps/web/package.json           ./apps/web/
+RUN npm install --workspaces --include-workspace-root
+
+EXPOSE 3000
+
+# apps/web 위치에서 next dev 실행 (0.0.0.0 바인딩 필수)
+WORKDIR /app/apps/web
+CMD ["bash", "-lc", "next dev --webpack --hostname 0.0.0.0"]
