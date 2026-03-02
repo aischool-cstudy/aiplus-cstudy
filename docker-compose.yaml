@@ -77,6 +77,7 @@ services:
       OPENAI_MODEL:          ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_BASE_URL:       ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       ASSESSMENT_ANALYSIS_MODE: ${ASSESSMENT_ANALYSIS_MODE:-rule}
+      PRACTICE_API_BASE_URL: ${PRACTICE_API_BASE_URL:-http://excutor:8100}
     ports:
       - "3000:3000"
     volumes:

@@ -232,7 +232,7 @@ class QueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
 
   private _serialize(val: unknown): unknown {
     if (val === null || val === undefined) return null;
-    if (Array.isArray(val)) return val;
+    // JSON/JSONB 컬럼에 들어가는 배열/객체는 문자열 JSON으로 일관 직렬화한다.
     if (typeof val === 'object') return JSON.stringify(val);
     return val;
   }
