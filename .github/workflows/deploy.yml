@@ -1,0 +1,26 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches: [deploy]
+
+jobs:
+  deploy:
+    runs-on: kmellon_raspi
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy .env file
+        run: echo "${{ secrets.ENV_FILE }}" > .env
+
+      - name: Deploy with Docker Compose
+        run: |
+          docker compose -f docker-compose.dev.yml pull --ignore-pull-failures
+          docker compose -f docker-compose.dev.yml up -d --build
+          docker compose -f docker-compose.dev.yml ps
+
+      - name: Clean up .env
+        if: always()
+        run: rm -f ./.env
