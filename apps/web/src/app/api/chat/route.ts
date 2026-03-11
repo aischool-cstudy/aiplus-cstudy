@@ -153,7 +153,7 @@ async function getManagerContext(
         .select('status, day_number')
         .eq('curriculum_id', curriculum.id);
 
-      const completed = items?.filter((item) => item.status === 'completed').length || 0;
+      const completed = items?.filter((item: { status: string | null }) => item.status === 'completed').length || 0;
       const total = items?.length || 0;
       const currentDay = getCurriculumDay(curriculum.start_date ?? null, curriculum.total_days || 1);
 

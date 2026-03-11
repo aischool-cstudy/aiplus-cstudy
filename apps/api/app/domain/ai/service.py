@@ -1,7 +1,7 @@
 from typing import Any
 from threading import BoundedSemaphore
 
-from app.domain.ai.providers.base import StructuredAIProvider
+from app.domain.ai.providers.base import StructuredAIProvider, StructuredAIResponse
 
 
 class AIService:
@@ -22,11 +22,22 @@ class AIService:
         system_prompt: str,
         user_prompt: str,
     ) -> dict[str, Any]:
+        return self.generate_json_with_meta(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        ).data
+
+    def generate_json_with_meta(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> StructuredAIResponse:
         acquired = self._semaphore.acquire(timeout=self._acquire_timeout_sec)
         if not acquired:
             raise RuntimeError("ai_backpressure_busy")
         try:
-            return self.primary.generate_json(
+            return self.primary.generate_json_with_meta(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )

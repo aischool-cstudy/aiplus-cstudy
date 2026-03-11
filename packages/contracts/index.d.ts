@@ -26,18 +26,17 @@ export type PracticeErrorCode =
   | 'unknown';
 
 export interface PracticeErrorResponse {
-  error: PracticeErrorCode;
-  message?: string;
+  error_code: PracticeErrorCode;
+  message: string;
 }
 
 export interface PracticeRunRequest {
+  problem_id: string;
   code: string;
-  language: string;
-  stdin?: string;
 }
 
 export interface PracticeRunResponse {
+  passed: boolean;
   stdout: string;
   stderr: string;
-  exit_code: number;
 }

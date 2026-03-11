@@ -9,6 +9,7 @@ import { cookies } from 'next/headers';
 import * as bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
 import { getPool } from './pool';
+import { serializeColumnValue } from './serialization';
 
 // ─────────────────────────────────────────────────
 // JWT
@@ -51,7 +52,7 @@ type SingleMode  = 'single' | 'maybe' | 'many';
 
 interface Condition {
   col: string;
-  op: 'eq' | 'in' | 'gte';
+  op: 'eq' | 'in' | 'gt' | 'gte';
   val: unknown;
 }
 interface OrderClause { col: string; asc: boolean }
@@ -142,6 +143,11 @@ class QueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
     return this;
   }
 
+  gt(col: string, val: unknown): this {
+    this._conditions.push({ col, op: 'gt', val });
+    return this;
+  }
+
   // ── 정렬 / 페이징 ─────────────────────────────
   order(col: string, opts?: { ascending?: boolean }): this {
     this._orders.push({ col, asc: opts?.ascending !== false });
@@ -206,6 +212,10 @@ class QueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
         params.push(c.val);
         return `"${c.col}" >= $${params.length}`;
       }
+      if (c.op === 'gt') {
+        params.push(c.val);
+        return `"${c.col}" > $${params.length}`;
+      }
       if (c.op === 'in') {
         const vals = c.val as unknown[];
         if (vals.length === 0) return 'FALSE';
@@ -230,11 +240,8 @@ class QueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
     }).join(', ');
   }
 
-  private _serialize(val: unknown): unknown {
-    if (val === null || val === undefined) return null;
-    // JSON/JSONB 컬럼에 들어가는 배열/객체는 문자열 JSON으로 일관 직렬화한다.
-    if (typeof val === 'object') return JSON.stringify(val);
-    return val;
+  private _serialize(column: string, value: unknown): unknown {
+    return serializeColumnValue(this._table, column, value);
   }
 
   private async _runSelect(client: PoolClient): Promise<QueryResult> {
@@ -276,7 +283,7 @@ class QueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
     const params: unknown[] = [];
 
     const valRows = rows.map((row) => {
-      const ph = cols.map((col) => { params.push(this._serialize(row[col])); return `$${params.length}`; });
+      const ph = cols.map((col) => { params.push(this._serialize(col, row[col])); return `$${params.length}`; });
       return `(${ph.join(', ')})`;
     });
 
@@ -292,7 +299,7 @@ class QueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
     const data = this._data as Record<string, unknown>;
     const params: unknown[] = [];
     const setClauses = Object.entries(data).map(([col, val]) => {
-      params.push(this._serialize(val));
+      params.push(this._serialize(col, val));
       return `"${col}" = $${params.length}`;
     });
     const where = this._buildWhere(params);
@@ -321,7 +328,7 @@ class QueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
     const params: unknown[] = [];
 
     const valRows = rows.map((row) => {
-      const ph = cols.map((col) => { params.push(this._serialize(row[col])); return `$${params.length}`; });
+      const ph = cols.map((col) => { params.push(this._serialize(col, row[col])); return `$${params.length}`; });
       return `(${ph.join(', ')})`;
     });
 

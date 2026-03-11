@@ -8,10 +8,23 @@ interface OpsDashboardProps {
   metrics: AIOpsMetrics;
 }
 
+const numberFormatter = new Intl.NumberFormat('ko-KR');
+
 function latencyLabel(ms: number) {
   if (!Number.isFinite(ms) || ms <= 0) return '-';
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function numberLabel(value: number) {
+  return numberFormatter.format(Math.max(0, Math.round(value)));
+}
+
+function usdLabel(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '$0.00';
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  if (value < 1) return `$${value.toFixed(3)}`;
+  return `$${value.toFixed(2)}`;
 }
 
 export function OpsDashboard({ metrics }: OpsDashboardProps) {
@@ -24,13 +37,35 @@ export function OpsDashboard({ metrics }: OpsDashboardProps) {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-6">
         <Card>
           <CardContent>
-            <p className="text-2xl font-bold">{metrics.totalRuns}</p>
+            <p className="text-2xl font-bold">{numberLabel(metrics.totalRuns)}</p>
             <p className="text-xs text-muted-foreground">총 AI 실행(run)</p>
             <p className="text-xs text-muted-foreground mt-1">
-              진행중 {metrics.runningRuns} / 완료 {metrics.completedRuns} / 중단 {metrics.abandonedRuns}
+              진행중 {numberLabel(metrics.runningRuns)} / 완료 {numberLabel(metrics.completedRuns)} / 중단 {numberLabel(metrics.abandonedRuns)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <p className="text-2xl font-bold">
+              {metrics.usage.costEstimatedRuns > 0 ? usdLabel(metrics.usage.totalEstimatedCostUsd) : '-'}
+            </p>
+            <p className="text-xs text-muted-foreground">총 예상 비용</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              비용 추정 {numberLabel(metrics.usage.costEstimatedRuns)} run / 평균 {metrics.usage.costEstimatedRuns > 0 ? usdLabel(metrics.usage.avgEstimatedCostUsdPerEstimatedRun) : '-'}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <p className="text-2xl font-bold">
+              {metrics.usage.meteredRuns > 0 ? numberLabel(metrics.usage.totalTokens) : '-'}
+            </p>
+            <p className="text-xs text-muted-foreground">총 토큰</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              입력 {numberLabel(metrics.usage.totalInputTokens)} / 출력 {numberLabel(metrics.usage.totalOutputTokens)}
             </p>
           </CardContent>
         </Card>
@@ -48,13 +83,13 @@ export function OpsDashboard({ metrics }: OpsDashboardProps) {
         </Card>
         <Card>
           <CardContent>
-            <p className="text-2xl font-bold">{metrics.recommendation.totalEvents}</p>
+            <p className="text-2xl font-bold">{numberLabel(metrics.recommendation.totalEvents)}</p>
             <p className="text-xs text-muted-foreground">추천 이벤트 수</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <p className="text-2xl font-bold">{metrics.retries.retriedRuns}</p>
+            <p className="text-2xl font-bold">{numberLabel(metrics.retries.retriedRuns)}</p>
             <p className="text-xs text-muted-foreground">
               재시도 발생 ({metrics.retries.retriedRate}% / 종결 run 기준)
             </p>
@@ -65,7 +100,7 @@ export function OpsDashboard({ metrics }: OpsDashboardProps) {
         </Card>
         <Card>
           <CardContent>
-            <p className="text-2xl font-bold">{metrics.reliability.fallbackRuns}</p>
+            <p className="text-2xl font-bold">{numberLabel(metrics.reliability.fallbackRuns)}</p>
             <p className="text-xs text-muted-foreground">
               폴백 발생 ({metrics.reliability.fallbackRate}% / 종결 run 기준)
             </p>
@@ -103,12 +138,14 @@ export function OpsDashboard({ metrics }: OpsDashboardProps) {
                       </Badge>
                     </div>
                     <div className="mt-2 text-xs text-muted-foreground flex flex-wrap gap-3">
-                      <span>실행 {pipeline.total}</span>
-                      <span>진행중 {pipeline.running}</span>
-                      <span>완료 {pipeline.completed}</span>
-                      <span>실패 {pipeline.failed}</span>
-                      <span>중단 {pipeline.abandoned}</span>
+                      <span>실행 {numberLabel(pipeline.total)}</span>
+                      <span>진행중 {numberLabel(pipeline.running)}</span>
+                      <span>완료 {numberLabel(pipeline.completed)}</span>
+                      <span>실패 {numberLabel(pipeline.failed)}</span>
+                      <span>중단 {numberLabel(pipeline.abandoned)}</span>
                       <span>평균 {latencyLabel(pipeline.avgLatencyMs)}</span>
+                      <span>토큰 {numberLabel(pipeline.totalTokens)}</span>
+                      <span>비용 {pipeline.costEstimatedRuns > 0 ? usdLabel(pipeline.totalEstimatedCostUsd) : '-'}</span>
                     </div>
                   </div>
                 ))}
@@ -158,12 +195,14 @@ export function OpsDashboard({ metrics }: OpsDashboardProps) {
                     </div>
                     <p className="text-xs text-muted-foreground mt-1 font-mono break-all">{metric.model}</p>
                     <div className="mt-2 text-xs text-muted-foreground flex flex-wrap gap-3">
-                      <span>실행 {metric.total}</span>
-                      <span>진행중 {metric.running}</span>
-                      <span>완료 {metric.completed}</span>
-                      <span>실패 {metric.failed}</span>
-                      <span>중단 {metric.abandoned}</span>
+                      <span>실행 {numberLabel(metric.total)}</span>
+                      <span>진행중 {numberLabel(metric.running)}</span>
+                      <span>완료 {numberLabel(metric.completed)}</span>
+                      <span>실패 {numberLabel(metric.failed)}</span>
+                      <span>중단 {numberLabel(metric.abandoned)}</span>
                       <span>평균 {latencyLabel(metric.avgLatencyMs)}</span>
+                      <span>토큰 {numberLabel(metric.totalTokens)}</span>
+                      <span>비용 {metric.costEstimatedRuns > 0 ? usdLabel(metric.totalEstimatedCostUsd) : '-'}</span>
                     </div>
                   </div>
                 ))}
@@ -211,7 +250,7 @@ export function OpsDashboard({ metrics }: OpsDashboardProps) {
             <div className="space-y-3">
               <div className="rounded-lg border border-border p-3">
                 <p className="text-xs text-muted-foreground">총 평가 시도</p>
-                <p className="text-xl font-semibold">{metrics.assessment.totalAttempts}</p>
+                <p className="text-xl font-semibold">{numberLabel(metrics.assessment.totalAttempts)}</p>
               </div>
               <div className="rounded-lg border border-border p-3">
                 <p className="text-xs text-muted-foreground">평균 점수</p>
