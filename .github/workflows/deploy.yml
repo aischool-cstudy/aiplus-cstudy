@@ -17,9 +17,9 @@ jobs:
 
       - name: Deploy with Docker Compose
         run: |
-          docker compose -f docker-compose.deploy.yml pull --ignore-pull-failures
-          docker compose -f docker-compose.deploy.yml up -d --build
-          docker compose -f docker-compose.deploy.yml ps
+          docker compose -f docker-compose.deploy.yaml pull --ignore-pull-failures
+          docker compose -f docker-compose.deploy.yaml up -d --build
+          docker compose -f docker-compose.deploy.yaml ps
 
       - name: Clean up .env
         if: always()
