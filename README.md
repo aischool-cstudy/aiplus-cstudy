@@ -131,4 +131,4 @@ psql "postgresql://postgres:postgres@localhost:5432/aiplus" \
 - Python 3.11+ (로컬 개발 시)
 
 
-#test
+#test1
