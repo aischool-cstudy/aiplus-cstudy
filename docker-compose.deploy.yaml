@@ -1,0 +1,112 @@
+services:
+  # ──────────────────────────────────────────────────────────
+  # PostgreSQL — auth 스키마 + 앱 스키마 포함
+  # ──────────────────────────────────────────────────────────
+  db:
+    build:
+      context: ./db
+      dockerfile: dockerfile
+    container_name: aiplus-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       aiplus
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aiplus"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ──────────────────────────────────────────────────────────
+  # FastAPI — AI 생성 파이프라인
+  # ──────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: dockerfile.dev
+    container_name: aiplus-api
+    restart: unless-stopped
+    volumes:
+      - ./apps/api/app:/app/app    # 소스 핫리로드
+    environment:
+      ENV:              ${ENV:-development}
+      API_HOST:         0.0.0.0
+      API_PORT:         "8000"
+      AI_PROVIDER:      ${AI_PROVIDER:-gemini}
+      GEMINI_API_KEY:   ${GEMINI_API_KEY:-}
+      GEMINI_MODEL:     ${GEMINI_MODEL:-gemini-2.0-flash}
+      OPENAI_API_KEY:   ${OPENAI_API_KEY:-}
+      OPENAI_MODEL:     ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL:  ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      DATABASE_URL:     postgresql+psycopg://postgres:postgres@db:5432/aiplus
+      AI_REQUEST_TIMEOUT_SEC: ${AI_REQUEST_TIMEOUT_SEC:-60}
+      AI_MAX_CONCURRENCY: ${AI_MAX_CONCURRENCY:-4}
+      AI_BACKPRESSURE_ACQUIRE_TIMEOUT_MS: ${AI_BACKPRESSURE_ACQUIRE_TIMEOUT_MS:-200}
+      ASSESSMENT_ANALYSIS_MODE: ${ASSESSMENT_ANALYSIS_MODE:-rule}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────
+  # Next.js — 프론트엔드 + 서버 액션
+  # ──────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/dockerfile.dev
+    container_name: aiplus-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV:              development
+      DATABASE_URL:          postgresql://postgres:postgres@db:5432/aiplus
+      JWT_SECRET:            ${JWT_SECRET:-local-dev-secret-change-in-production}
+      FASTAPI_URL:           http://api:8000
+      FASTAPI_MAX_RETRIES:   ${FASTAPI_MAX_RETRIES:-0}
+      FASTAPI_RETRY_BASE_MS: ${FASTAPI_RETRY_BASE_MS:-250}
+      AI_PROVIDER:           ${AI_PROVIDER:-gemini}
+      GEMINI_API_KEY:        ${GEMINI_API_KEY:-}
+      GEMINI_MODEL:          ${GEMINI_MODEL:-gemini-2.0-flash}
+      OPENAI_API_KEY:        ${OPENAI_API_KEY:-}
+      OPENAI_MODEL:          ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL:       ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      ASSESSMENT_ANALYSIS_MODE: ${ASSESSMENT_ANALYSIS_MODE:-rule}
+      PRACTICE_API_BASE_URL: ${PRACTICE_API_BASE_URL:-http://excutor:8100}
+    ports:
+      - "8888:3000"
+    volumes:
+      - ./apps/web:/app/apps/web           # 소스 핫리로드
+      - ./packages:/app/packages           # contracts 패키지
+      - web_node_modules:/app/node_modules # 컨테이너 node_modules 보호
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  # ──────────────────────────────────────────────────────────
+  # NestJS — 코드 실행 sandbox API (port 8100)
+  # ──────────────────────────────────────────────────────────
+  excutor:
+    build:
+      context: ./apps/excutor
+      dockerfile: dockerfile.dev
+    container_name: aiplus-excutor
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./apps/excutor/src:/app/src        # 소스 핫리로드
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  postgres_data:
+  web_node_modules:

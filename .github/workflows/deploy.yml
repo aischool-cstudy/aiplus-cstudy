@@ -6,7 +6,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: kmellon_raspi
+    runs-on: [self-hosted, kmellon_raspi]
     
     steps:
       - name: Checkout
@@ -17,9 +17,9 @@ jobs:
 
       - name: Deploy with Docker Compose
         run: |
-          docker compose -f docker-compose.dev.yml pull --ignore-pull-failures
-          docker compose -f docker-compose.dev.yml up -d --build
-          docker compose -f docker-compose.dev.yml ps
+          docker compose -f docker-compose.deploy.yml pull --ignore-pull-failures
+          docker compose -f docker-compose.deploy.yml up -d --build
+          docker compose -f docker-compose.deploy.yml ps
 
       - name: Clean up .env
         if: always()
