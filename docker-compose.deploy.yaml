@@ -78,6 +78,7 @@ services:
       OPENAI_BASE_URL:       ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       ASSESSMENT_ANALYSIS_MODE: ${ASSESSMENT_ANALYSIS_MODE:-rule}
       PRACTICE_API_BASE_URL: ${PRACTICE_API_BASE_URL:-http://excutor:8100}
+    user: "1000:1000"
     ports:
       - "80:3000"
     volumes:
