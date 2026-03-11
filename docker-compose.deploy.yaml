@@ -79,7 +79,7 @@ services:
       ASSESSMENT_ANALYSIS_MODE: ${ASSESSMENT_ANALYSIS_MODE:-rule}
       PRACTICE_API_BASE_URL: ${PRACTICE_API_BASE_URL:-http://excutor:8100}
     ports:
-      - "8888:3000"
+      - "80:3000"
     volumes:
       - ./apps/web:/app/apps/web           # 소스 핫리로드
       - ./packages:/app/packages           # contracts 패키지

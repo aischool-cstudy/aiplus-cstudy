@@ -129,7 +129,3 @@ psql "postgresql://postgres:postgres@localhost:5432/aiplus" \
 - Docker Desktop (또는 Docker Engine + Compose v2)
 - Node.js 20+ / npm (로컬 개발 시)
 - Python 3.11+ (로컬 개발 시)
-
-
-##
-tests
