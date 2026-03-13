@@ -46,6 +46,38 @@ export interface WrongReviewQueueQuestion {
   explanation: string;
 }
 
+interface CurriculumItemLinkRow {
+  content_id: string | null;
+  curriculum_id: string | null;
+  day_number: number | null;
+  order_in_day: number | null;
+}
+
+interface CurriculumTitleRow {
+  id: string | null;
+  title: string | null;
+}
+
+interface LearningProgressRow {
+  content_id: string | null;
+  status: 'not_started' | 'in_progress' | 'completed' | null;
+  quiz_score: number | null;
+  updated_at: string | null;
+}
+
+interface LearningFeedbackRow {
+  content_id: string | null;
+  understanding_rating: number | null;
+  created_at: string | null;
+}
+
+interface AssessmentAttemptRow {
+  content_id: string | null;
+  attempt_type: string | null;
+  wrong_question_indexes: unknown;
+  created_at: string | null;
+}
+
 export async function submitContentAssessmentAttempt(params: {
   contentId: string;
   attemptType: AssessmentAttemptType;
@@ -162,7 +194,8 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
     .select('content_id, curriculum_id, day_number, order_in_day')
     .in('content_id', ids);
 
-  const curriculumRowsNormalized = (curriculumItemRows || [])
+  const curriculumRows = (curriculumItemRows || []) as CurriculumItemLinkRow[];
+  const curriculumRowsNormalized = curriculumRows
     .map((row) => ({
       contentId: row.content_id ? String(row.content_id) : null,
       curriculumId: row.curriculum_id ? String(row.curriculum_id) : null,
@@ -185,8 +218,9 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
       .select('id, title')
       .eq('user_id', userId)
       .in('id', curriculumIds);
+    const ownCurriculumRows = (ownCurriculums || []) as CurriculumTitleRow[];
     curriculumTitleById = new Map(
-      (ownCurriculums || [])
+      ownCurriculumRows
         .map((row) => [String(row.id), String(row.title || '')])
         .filter((row): row is [string, string] => Boolean(row[0]))
     );
@@ -227,7 +261,8 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
     low_score_attempts: number;
   }>();
 
-  for (const row of progressRows || []) {
+  const normalizedProgressRows = (progressRows || []) as LearningProgressRow[];
+  for (const row of normalizedProgressRows) {
     const contentId = row.content_id as string | null;
     if (!contentId) continue;
 
@@ -257,8 +292,9 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
     .order('created_at', { ascending: false });
 
   if (!feedbackError && feedbackRows) {
+    const normalizedFeedbackRows = feedbackRows as LearningFeedbackRow[];
     latestFeedbackByContent = new Map<string, { understanding_rating: number | null }>();
-    for (const row of feedbackRows) {
+    for (const row of normalizedFeedbackRows) {
       const contentId = row.content_id as string | null;
       if (!contentId || latestFeedbackByContent.has(contentId)) continue;
       latestFeedbackByContent.set(contentId, {
@@ -280,7 +316,8 @@ export async function getUserHistoryContents(userId: string): Promise<HistoryCon
     .order('created_at', { ascending: false });
 
   if (!attemptsError && attemptRows) {
-    for (const row of attemptRows) {
+    const normalizedAttemptRows = attemptRows as AssessmentAttemptRow[];
+    for (const row of normalizedAttemptRows) {
       const contentId = row.content_id as string | null;
       if (!contentId || latestAttemptByContent.has(contentId)) continue;
       const attemptType = String(row.attempt_type || 'full');

@@ -25,6 +25,24 @@ interface LearnerProfileRow {
   learning_style?: string | null;
 }
 
+interface CurriculumOrderRow {
+  title: string;
+  day_number: number;
+  order_in_day: number;
+}
+
+interface LearningFeedbackRow {
+  understanding_rating: number | null;
+  difficult_concepts: unknown;
+}
+
+interface LearnerConceptStateRow {
+  concept_tag: string | null;
+  mastery_score: number | null;
+  forgetting_risk: number | null;
+  confidence_score: number | null;
+}
+
 export interface LearningGenerationContext {
   item: CurriculumItemRow;
   curriculum: CurriculumRow;
@@ -73,7 +91,7 @@ export async function loadLearningGenerationContext(
     .order('day_number')
     .order('order_in_day');
 
-  const items = allItems || [];
+  const items = (allItems || []) as CurriculumOrderRow[];
   const currentIdx = items.findIndex(
     (row) => row.title === item.title && row.day_number === item.day_number
   );
@@ -95,7 +113,8 @@ export async function loadLearningGenerationContext(
     .limit(5);
 
   if (!feedbackError && feedbackRows) {
-    recentFeedback = feedbackRows
+    const normalizedFeedbackRows = feedbackRows as LearningFeedbackRow[];
+    recentFeedback = normalizedFeedbackRows
       .filter((row) => typeof row.understanding_rating === 'number')
       .map((row) => ({
         understanding_rating: row.understanding_rating as number,
@@ -119,7 +138,8 @@ export async function loadLearningGenerationContext(
     .limit(5);
 
   if (!conceptError && conceptRows) {
-    conceptFocus = conceptRows
+    const normalizedConceptRows = conceptRows as LearnerConceptStateRow[];
+    conceptFocus = normalizedConceptRows
       .map((row) => ({
         concept_tag: String(row.concept_tag || '').trim(),
         mastery_score: Number(row.mastery_score ?? 0),

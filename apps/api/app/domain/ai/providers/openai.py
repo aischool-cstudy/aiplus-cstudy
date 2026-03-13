@@ -3,6 +3,12 @@ from typing import Any
 from urllib import request
 
 from app.domain.ai.providers.common import parse_json_text
+from app.domain.ai.providers.base import (
+    AIAttemptError,
+    AIResponseMeta,
+    AIUsageMeta,
+    StructuredAIResponse,
+)
 
 
 class OpenAIProvider:
@@ -24,12 +30,12 @@ class OpenAIProvider:
         self.base_url = base_url.rstrip("/")
         self.timeout_sec = timeout_sec
 
-    def generate_json(
+    def generate_json_with_meta(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> dict[str, Any]:
+    ) -> StructuredAIResponse:
         endpoint = f"{self.base_url}/chat/completions"
         payload = {
             "model": self.model,
@@ -58,8 +64,29 @@ class OpenAIProvider:
             raise RuntimeError(f"openai_request_failed:{exc}") from exc
 
         decoded = json.loads(body)
-        text = self._extract_text(decoded)
-        return parse_json_text(text)
+        meta = AIResponseMeta(
+            provider="openai",
+            model=str(decoded.get("model") or self.model),
+            usage=self._extract_usage(decoded),
+        )
+        try:
+            text = self._extract_text(decoded)
+            data = parse_json_text(text)
+        except Exception as exc:
+            raise AIAttemptError(str(exc), meta=meta) from exc
+
+        return StructuredAIResponse(data=data, meta=meta)
+
+    def generate_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> dict[str, Any]:
+        return self.generate_json_with_meta(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        ).data
 
     @staticmethod
     def _extract_text(response_json: dict[str, Any]) -> str:
@@ -85,3 +112,35 @@ class OpenAIProvider:
                 return "\n".join(texts)
 
         raise RuntimeError("openai_content_missing")
+
+    @staticmethod
+    def _extract_usage(response_json: dict[str, Any]) -> AIUsageMeta | None:
+        usage = response_json.get("usage")
+        if not isinstance(usage, dict):
+            return None
+
+        prompt_details = usage.get("prompt_tokens_details")
+        extracted = AIUsageMeta(
+            input_tokens=OpenAIProvider._safe_int(usage.get("prompt_tokens")),
+            output_tokens=OpenAIProvider._safe_int(usage.get("completion_tokens")),
+            total_tokens=OpenAIProvider._safe_int(usage.get("total_tokens")),
+            cached_input_tokens=OpenAIProvider._safe_int(
+                prompt_details.get("cached_tokens") if isinstance(prompt_details, dict) else None
+            ),
+        )
+        if all(value is None for value in (
+            extracted.input_tokens,
+            extracted.output_tokens,
+            extracted.total_tokens,
+            extracted.cached_input_tokens,
+        )):
+            return None
+        return extracted
+
+    @staticmethod
+    def _safe_int(value: Any) -> int | None:
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            return None
+        return candidate if candidate >= 0 else None

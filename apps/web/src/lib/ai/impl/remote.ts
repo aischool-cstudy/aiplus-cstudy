@@ -18,6 +18,7 @@ import type {
   SectionedContentOutput,
 } from '../schemas';
 import type { ApiErrorCode, ApiErrorResponse } from '@aiplus/contracts';
+import { extractAIResponsePayload, mergeServerAIMeta } from '../metering';
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 const FASTAPI_MAX_RETRIES = Number(process.env.FASTAPI_MAX_RETRIES || 0);
@@ -88,6 +89,7 @@ class RemoteRequestError extends Error {
 interface PostJsonResult<T> {
   data: T;
   meta: AICallMeta;
+  serverMeta: Record<string, unknown> | null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -139,32 +141,6 @@ function buildCallMeta(
     status: typeof status === 'number' ? status : null,
     errorCode: typeof errorCode === 'string' ? errorCode : null,
     retryable: typeof retryable === 'boolean' ? retryable : null,
-  };
-}
-
-function mergeFallbackServerMeta(
-  callMeta: AICallMeta,
-  serverMeta?: { fallback_used?: unknown; failure_kind?: unknown; attempt_count?: unknown } | null
-): AICallMeta {
-  if (!serverMeta || typeof serverMeta !== 'object') {
-    return callMeta;
-  }
-
-  const fallbackUsed = serverMeta.fallback_used === true;
-  const fallbackKind = typeof serverMeta.failure_kind === 'string'
-    ? serverMeta.failure_kind
-    : null;
-  const attemptCandidate = Number(serverMeta.attempt_count);
-  const attemptCount = Number.isFinite(attemptCandidate) && attemptCandidate > 0
-    ? Math.max(callMeta.attemptCount, Math.round(attemptCandidate))
-    : callMeta.attemptCount;
-
-  return {
-    ...callMeta,
-    attemptCount,
-    retried: attemptCount > 1,
-    fallbackUsed,
-    fallbackKind,
   };
 }
 
@@ -237,9 +213,12 @@ async function postJson<T>(path: string, body: unknown): Promise<PostJsonResult<
         const parsed = parseErrorBody(parsedBody);
         throw new RemoteHttpError(path, res.status, parsed.detail, parsed.errorCode, parsed.retryable);
       }
+      const raw = await res.json() as T;
+      const extracted = extractAIResponsePayload<T>(raw);
       return {
-        data: await res.json() as T,
+        data: extracted.data,
         meta: buildCallMeta(path, attempt + 1, res.status),
+        serverMeta: extracted.serverMeta,
       };
     } catch (error) {
       const timeoutError = isAbortLikeError(error)
@@ -283,8 +262,8 @@ export async function remoteGenerate(
 ): Promise<AIResult<GeneratedContentOutput>> {
   const path = '/api/generate';
   try {
-    const { data, meta } = await postJson<GeneratedContentOutput>(path, input);
-    return { success: true, data, meta };
+    const { data, meta, serverMeta } = await postJson<GeneratedContentOutput>(path, input);
+    return { success: true, data, meta: mergeServerAIMeta(meta, serverMeta) };
   } catch (error) {
     return buildErrorResult<GeneratedContentOutput>(path, error);
   }
@@ -316,8 +295,8 @@ export async function remoteAssessLevel(
 ): Promise<AIResult<AssessmentQuestionsOutput>> {
   const path = '/api/assessment/questions';
   try {
-    const { data, meta } = await postJson<AssessmentQuestionsOutput>(path, params);
-    const mergedMeta = mergeFallbackServerMeta(meta, data.meta || null);
+    const { data, meta, serverMeta } = await postJson<AssessmentQuestionsOutput>(path, params);
+    const mergedMeta = mergeServerAIMeta(meta, serverMeta);
     return { success: true, data, meta: mergedMeta };
   } catch (error) {
     return buildErrorResult<AssessmentQuestionsOutput>(path, error);
@@ -329,8 +308,8 @@ export async function remoteAnalyzeAnswers(
 ): Promise<AIResult<LevelAssessmentResult>> {
   const path = '/api/assessment/analyze';
   try {
-    const { data, meta } = await postJson<LevelAssessmentResult>(path, params);
-    return { success: true, data, meta };
+    const { data, meta, serverMeta } = await postJson<LevelAssessmentResult>(path, params);
+    return { success: true, data, meta: mergeServerAIMeta(meta, serverMeta) };
   } catch (error) {
     return buildErrorResult<LevelAssessmentResult>(path, error);
   }
@@ -341,8 +320,8 @@ export async function remoteGenerateCurriculum(
 ): Promise<AIResult<CurriculumOutput>> {
   const path = '/api/curriculum/generate';
   try {
-    const { data, meta } = await postJson<CurriculumOutput>(path, params);
-    return { success: true, data, meta };
+    const { data, meta, serverMeta } = await postJson<CurriculumOutput>(path, params);
+    return { success: true, data, meta: mergeServerAIMeta(meta, serverMeta) };
   } catch (error) {
     return buildErrorResult<CurriculumOutput>(path, error);
   }
@@ -353,8 +332,8 @@ export async function remoteRefineCurriculum(
 ): Promise<AIResult<CurriculumOutput>> {
   const path = '/api/curriculum/refine';
   try {
-    const { data, meta } = await postJson<CurriculumOutput>(path, params);
-    return { success: true, data, meta };
+    const { data, meta, serverMeta } = await postJson<CurriculumOutput>(path, params);
+    return { success: true, data, meta: mergeServerAIMeta(meta, serverMeta) };
   } catch (error) {
     return buildErrorResult<CurriculumOutput>(path, error);
   }
@@ -365,8 +344,8 @@ export async function remoteGenerateReasoning(
 ): Promise<AIResult<PedagogicalReasoningOutput>> {
   const path = '/api/curriculum/reasoning';
   try {
-    const { data, meta } = await postJson<PedagogicalReasoningOutput>(path, params);
-    return { success: true, data, meta };
+    const { data, meta, serverMeta } = await postJson<PedagogicalReasoningOutput>(path, params);
+    return { success: true, data, meta: mergeServerAIMeta(meta, serverMeta) };
   } catch (error) {
     return buildErrorResult<PedagogicalReasoningOutput>(path, error);
   }
@@ -378,11 +357,11 @@ export async function remoteGenerateSections(
 ): Promise<AIResult<SectionedContentOutput>> {
   const path = '/api/curriculum/sections';
   try {
-    const { data, meta } = await postJson<SectionedContentOutput>(path, {
+    const { data, meta, serverMeta } = await postJson<SectionedContentOutput>(path, {
       input,
       reasoning,
     });
-    const mergedMeta = mergeFallbackServerMeta(meta, data.meta || null);
+    const mergedMeta = mergeServerAIMeta(meta, serverMeta);
     return { success: true, data, meta: mergedMeta };
   } catch (error) {
     return buildErrorResult<SectionedContentOutput>(path, error);

@@ -17,6 +17,19 @@ export async function getNextRecommendation(
   userId: string
 ): Promise<Recommendation | null> {
   const supabase = await createClient();
+  interface CourseRow {
+    id: string;
+    slug: string;
+    name: string;
+  }
+  interface ProgressRow {
+    topic_id: string;
+    status: string | null;
+  }
+  interface TopicRow {
+    id: string;
+    title: string;
+  }
 
   // 1. 모든 코스의 토픽을 순서대로 가져오기
   const { data: courses } = await supabase
@@ -25,6 +38,7 @@ export async function getNextRecommendation(
     .order('order');
 
   if (!courses || courses.length === 0) return null;
+  const courseRows = courses as CourseRow[];
 
   // 2. 사용자 진도 가져오기
   const { data: progress } = await supabase
@@ -33,13 +47,13 @@ export async function getNextRecommendation(
     .eq('user_id', userId);
 
   const completedTopics = new Set(
-    (progress || [])
+    ((progress || []) as ProgressRow[])
       .filter((p) => p.status === 'completed')
       .map((p) => p.topic_id)
   );
 
   // 3. 각 코스에서 다음 미완료 토픽 찾기
-  for (const course of courses) {
+  for (const course of courseRows) {
     const { data: topics } = await supabase
       .from('topics')
       .select('id, title')
@@ -48,7 +62,7 @@ export async function getNextRecommendation(
 
     if (!topics) continue;
 
-    const nextTopic = topics.find((t) => !completedTopics.has(t.id));
+    const nextTopic = (topics as TopicRow[]).find((t) => !completedTopics.has(t.id));
     if (nextTopic) {
       return {
         topicId: nextTopic.id,

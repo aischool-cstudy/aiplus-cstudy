@@ -41,6 +41,13 @@ export const GeneratedContentSchema = z.object({
 
 export type GeneratedContentOutput = z.infer<typeof GeneratedContentSchema>;
 
+export interface AITokenUsage {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  cachedInputTokens?: number | null;
+}
+
 export interface AICallMeta {
   gateway: 'fastapi';
   endpoint: string;
@@ -53,6 +60,10 @@ export interface AICallMeta {
   retryable?: boolean | null;
   fallbackUsed?: boolean | null;
   fallbackKind?: string | null;
+  usage?: AITokenUsage | null;
+  estimatedCostUsd?: number | null;
+  pricingSource?: string | null;
+  pricingReferenceUrl?: string | null;
 }
 
 export interface AIResult<T> {
