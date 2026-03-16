@@ -12,7 +12,8 @@ jobs:
 
       - name: Cleanup
         run: |
-          docker compose -f docker-compose.deploy.yaml down || true
+          docker 
+          docker compose -f docker-compose.deploy.yaml down -v || true
 
 
       - name: Checkout
