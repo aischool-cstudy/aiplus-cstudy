@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY package.json tsconfig.json nest-cli.json ./
-RUN npm install
+RUN npm install && mkdir -p dist
 
 EXPOSE 8100
 
