@@ -104,6 +104,8 @@ services:
     environment:
       NODE_ENV: development
     user: "1000:1000"
+    group_add:
+      - "999"
     ports:
       - "8100:8100"
     volumes:
