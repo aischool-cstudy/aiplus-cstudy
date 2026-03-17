@@ -33,7 +33,7 @@ const levelLabels: Record<string, string> = {
 
 export function CurriculumList({ curriculums }: CurriculumListProps) {
   return (
-    <div className="px-4 md:px-8 py-6 max-w-4xl">
+    <div className="px-4 md:px-8 py-6 max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold">내 커리큘럼</h2>

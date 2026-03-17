@@ -29,7 +29,7 @@ function usdLabel(value: number) {
 
 export function OpsDashboard({ metrics }: OpsDashboardProps) {
   return (
-    <div className="px-4 md:px-8 py-6 max-w-6xl">
+    <div className="px-4 md:px-8 py-6 max-w-5xl">
       <div className="mb-6">
         <h2 className="text-xl font-bold">AI 운영 지표</h2>
         <p className="text-sm text-muted-foreground mt-1">
@@ -43,7 +43,7 @@ export function OpsDashboard({ metrics }: OpsDashboardProps) {
             <p className="text-2xl font-bold">{numberLabel(metrics.totalRuns)}</p>
             <p className="text-xs text-muted-foreground">총 AI 실행(run)</p>
             <p className="text-xs text-muted-foreground mt-1">
-              진행중 {numberLabel(metrics.runningRuns)} / 완료 {numberLabel(metrics.completedRuns)} / 중단 {numberLabel(metrics.abandonedRuns)}
+              진행중 {numberLabel(metrics.runningRuns)} / 완료 {numberLabel(metrics.completedRuns)} / 실패 {numberLabel(metrics.failedRuns)} / 중단 {numberLabel(metrics.abandonedRuns)}
             </p>
           </CardContent>
         </Card>

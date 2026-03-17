@@ -165,7 +165,7 @@ export function TopicSession({
   // 콘텐츠가 없을 때
   if (!generatedContent) {
     return (
-      <div className="px-4 md:px-8 py-6 max-w-3xl">
+      <div className="px-4 md:px-8 py-6 max-w-5xl">
         <Card>
           <CardContent className="text-center py-12">
             <BookOpen className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -184,7 +184,7 @@ export function TopicSession({
   }
 
   return (
-    <div className="px-4 md:px-8 py-6 max-w-3xl">
+    <div className="px-4 md:px-8 py-6 max-w-5xl">
       {/* Topic header */}
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-2">

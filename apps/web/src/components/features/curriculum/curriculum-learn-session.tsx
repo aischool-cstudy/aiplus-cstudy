@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   generateCurriculumLearningContent,
@@ -107,26 +107,16 @@ export function CurriculumLearnSession({
     currentContent
     && String(currentContent.language || '').trim().toLowerCase().includes('python')
   );
-  const practiceInitialCode = codeExamples?.[0]?.code || '';
-  const [practiceExpanded, setPracticeExpanded] = useState(false);
   const isExampleSection = currentSection?.type === 'example';
-  const shouldShowPractice = !isV2 || isExampleSection || practiceExpanded;
-
-  useEffect(() => {
-    if (!isV2) return;
-    setPracticeExpanded(false);
-  }, [currentStep, isV2]);
+  const practiceInitialCode = isV2
+    ? (typeof currentSection?.code === 'string' ? currentSection.code : '')
+    : (codeExamples?.[0]?.code || '');
 
   // v2: 모든 check 섹션의 답변 상태
   const [checkAnswers, setCheckAnswers] = useState<Record<number, number>>({});
   const [checkSubmitted, setCheckSubmitted] = useState<Record<number, boolean>>({});
-  const checkAttemptType: 'full' = 'full';
+  const checkAttemptType = 'full' as const;
   const checkVariantSeed = 0;
-  const [checkSummary, setCheckSummary] = useState<{
-    total: number;
-    correct: number;
-    wrongIndexes: number[];
-  } | null>(null);
 
   // v1: 구형 퀴즈 상태
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
@@ -142,6 +132,8 @@ export function CurriculumLearnSession({
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const isCurrentCheckSection = currentSection?.type === 'check';
+  const canAdvanceToNextStep = !isCurrentCheckSection || Boolean(checkSubmitted[currentStep]);
   const checkOptionOrders = useMemo(
     () => buildCheckOptionOrderMap(sections, checkVariantSeed),
     [sections, checkVariantSeed]
@@ -249,11 +241,6 @@ export function CurriculumLearnSession({
     setFeedbackExpanded(false);
     setFeedbackSaved(false);
     setFeedbackError(null);
-    setCheckSummary({
-      total: totalChecks,
-      correct: correctChecks,
-      wrongIndexes,
-    });
 
     if (currentContent) {
       await submitCurriculumAssessmentAttempt({
@@ -384,7 +371,7 @@ export function CurriculumLearnSession({
   // 콘텐츠 없을 때
   if (!currentContent) {
     return (
-      <div className="px-4 md:px-8 py-6 pb-28 md:pb-24 max-w-3xl">
+      <div className="px-4 md:px-8 py-6 pb-28 md:pb-24 max-w-5xl">
         <Link href={`/curriculum/${curriculumId}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="w-4 h-4" /> 커리큘럼으로
         </Link>
@@ -415,7 +402,7 @@ export function CurriculumLearnSession({
   // ==========================================
   if (isV2 && sections.length > 0) {
     return (
-      <div className="px-4 md:px-8 py-6 pb-28 md:pb-24 max-w-3xl">
+      <div className="px-4 md:px-8 py-6 pb-28 md:pb-24 max-w-5xl">
         {sessionError && (
           <div className="mb-4 rounded-lg bg-error/10 text-error text-sm p-3">
             {sessionError}
@@ -501,41 +488,12 @@ export function CurriculumLearnSession({
           />
         )}
 
-        {practiceEnabled && (
+        {practiceEnabled && isExampleSection && (
           <div className="mt-5 border-t border-border/60 pt-4">
-            {!isExampleSection && (
-              <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">코드 실습</p>
-                    <p className="text-xs text-muted-foreground">
-                      필요할 때 열어서 직접 실행해보세요.
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant={practiceExpanded ? 'secondary' : 'primary'}
-                    size="sm"
-                    aria-expanded={practiceExpanded}
-                    onClick={() => setPracticeExpanded(prev => !prev)}
-                  >
-                    <Code2 className="w-4 h-4 mr-1" />
-                    {practiceExpanded ? '코드 실습 닫기' : '코드 실습 열기'}
-                    {practiceExpanded ? (
-                      <ChevronDown className="w-4 h-4 ml-1" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 ml-1" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            )}
-            <div className={shouldShowPractice ? '' : 'hidden'} aria-hidden={!shouldShowPractice}>
-              <PracticeRunner
-                problemId={currentContent.id}
-                initialCode={practiceInitialCode}
-              />
-            </div>
+            <PracticeRunner
+              problemId={currentContent.id}
+              initialCode={practiceInitialCode}
+            />
           </div>
         )}
 
@@ -551,12 +509,15 @@ export function CurriculumLearnSession({
           </Button>
 
           {currentStep < totalSteps - 1 ? (
-            <Button
-              onClick={() => setCurrentStep(prev => Math.min(totalSteps - 1, prev + 1))}
-            >
-              다음
-              <ArrowRight className="w-4 h-4 ml-1" />
-            </Button>
+            <div className="flex flex-col items-end gap-2">
+              <Button
+                onClick={() => setCurrentStep(prev => Math.min(totalSteps - 1, prev + 1))}
+                disabled={!canAdvanceToNextStep}
+              >
+                다음
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
           ) : !completed ? (
             <Button
               onClick={handleComplete}
@@ -682,7 +643,7 @@ export function CurriculumLearnSession({
   // v1 호환: 구형 콘텐츠 (마크다운 렌더링 개선)
   // ==========================================
   return (
-    <div className="px-4 md:px-8 py-6 pb-28 md:pb-24 max-w-3xl">
+    <div className="px-4 md:px-8 py-6 pb-28 md:pb-24 max-w-5xl">
       {sessionError && (
         <div className="mb-4 rounded-lg bg-error/10 text-error text-sm p-3">
           {sessionError}
@@ -858,12 +819,21 @@ export function CurriculumLearnSession({
         </div>
         <div className="w-full sm:w-auto sm:ml-auto">
           {nextItem ? (
-            <Link href={`/curriculum/${curriculumId}/learn/${nextItem.id}`} className="block">
-              <Button variant={completed ? 'primary' : 'ghost'} className="w-full sm:w-auto sm:max-w-[360px]">
-                <span className="min-w-0 truncate">다음: {nextItem.title}</span>
-                <ArrowRight className="w-4 h-4 ml-1 flex-shrink-0" />
-              </Button>
-            </Link>
+            completed ? (
+              <Link href={`/curriculum/${curriculumId}/learn/${nextItem.id}`} className="block">
+                <Button variant="primary" className="w-full sm:w-auto sm:max-w-[360px]">
+                  <span className="min-w-0 truncate">다음: {nextItem.title}</span>
+                  <ArrowRight className="w-4 h-4 ml-1 flex-shrink-0" />
+                </Button>
+              </Link>
+            ) : (
+              <div className="flex flex-col items-stretch gap-2">
+                <Button disabled variant="ghost" className="w-full sm:w-auto sm:max-w-[360px]">
+                  <span className="min-w-0 truncate">다음: {nextItem.title}</span>
+                  <ArrowRight className="w-4 h-4 ml-1 flex-shrink-0" />
+                </Button>
+              </div>
+            )
           ) : completed ? (
             <Link href={`/curriculum/${curriculumId}`} className="block">
               <Button className="w-full sm:w-auto">
