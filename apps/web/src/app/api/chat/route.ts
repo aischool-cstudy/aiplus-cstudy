@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { DEFAULT_ASSISTANT_PERSONA, normalizeAssistantPersona } from '@/lib/ai/personas';
+import { getCurriculumDay, normalizeCurriculumTotalDays } from '@/lib/curriculum/day';
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000';
 
@@ -8,14 +9,6 @@ interface IncomingMessage {
   role?: string;
   content?: string;
   parts?: Array<{ type?: string; text?: string }>;
-}
-
-function getCurriculumDay(startDateValue: string | null, totalDays: number): number {
-  if (!startDateValue) return 1;
-  const startDate = new Date(`${startDateValue}T00:00:00`);
-  const now = new Date();
-  const elapsedDays = Math.max(0, Math.floor((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
-  return Math.min(Math.max(1, elapsedDays + 1), Math.max(1, totalDays));
 }
 
 function extractMessageText(message: IncomingMessage): string {
@@ -155,7 +148,8 @@ async function getManagerContext(
 
       const completed = items?.filter((item: { status: string | null }) => item.status === 'completed').length || 0;
       const total = items?.length || 0;
-      const currentDay = getCurriculumDay(curriculum.start_date ?? null, curriculum.total_days || 1);
+      const totalDays = normalizeCurriculumTotalDays(curriculum.total_days);
+      const currentDay = getCurriculumDay(curriculum.start_date ?? null, totalDays);
 
       curriculumStats.push({
         title: curriculum.title,
@@ -164,7 +158,7 @@ async function getManagerContext(
         completed,
         total,
         currentDay,
-        totalDays: curriculum.total_days,
+        totalDays,
       });
     }
   }

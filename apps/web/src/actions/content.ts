@@ -1,12 +1,13 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import type { GeneratedContent, Course, Topic, HistoryContentItem, QuizQuestion } from '@/types';
+import type { GeneratedContent, Course, Topic, HistoryContentItem, QuizQuestion, ContentSection } from '@/types';
 import {
   computeReviewAssessment,
   diffDays,
   parseWrongQuestionIndexes,
 } from '@/lib/review/assessment';
+import { sanitizeQuizOptions } from '@/lib/quiz/options';
 
 export async function getContent(contentId: string): Promise<GeneratedContent | null> {
   const supabase = await createClient();
@@ -78,6 +79,112 @@ interface AssessmentAttemptRow {
   created_at: string | null;
 }
 
+function normalizeReviewSection(raw: unknown): ContentSection {
+  const row = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const asString = (value: unknown) => (typeof value === 'string' ? value : '');
+  const sectionTypeRaw = asString(row.type);
+  const sectionType = ['motivation', 'concept', 'example', 'check', 'summary'].includes(sectionTypeRaw)
+    ? sectionTypeRaw as ContentSection['type']
+    : 'concept';
+  const question = asString(row.question);
+  const body = asString(row.body);
+  const explanation = asString(row.explanation);
+  const correctAnswer = typeof row.correct_answer === 'number' && Number.isFinite(row.correct_answer)
+    ? Math.round(row.correct_answer)
+    : -1;
+
+  return {
+    type: sectionType,
+    title: asString(row.title),
+    body,
+    code: asString(row.code),
+    language: asString(row.language),
+    explanation,
+    question,
+    options: sectionType === 'check' ? sanitizeQuizOptions(row.options, question, body, explanation) : [],
+    correct_answer: correctAnswer,
+    next_preview: asString(row.next_preview ?? row.nextPreview),
+  };
+}
+
+function extractWrongReviewQuestionsFromSections(
+  content: HistoryContentItem,
+  wrongIndexes: number[]
+): WrongReviewQueueQuestion[] {
+  const rawSections = Array.isArray(content.sections) ? content.sections : [];
+  if (rawSections.length === 0) return [];
+
+  const sections = rawSections.map(normalizeReviewSection);
+  const questions: WrongReviewQueueQuestion[] = [];
+
+  for (const questionIndex of wrongIndexes) {
+    const section = sections[questionIndex];
+    if (!section || section.type !== 'check') continue;
+    if (!section.question || !Array.isArray(section.options) || section.options.length < 2) continue;
+
+    const correctAnswer = Number(section.correct_answer);
+    if (!Number.isFinite(correctAnswer) || correctAnswer < 0 || correctAnswer >= section.options.length) continue;
+
+    questions.push({
+      contentId: content.id,
+      contentTitle: content.title,
+      topic: content.topic,
+      language: content.language,
+      difficulty: content.difficulty,
+      teachingMethod: content.teaching_method || null,
+      questionIndex,
+      question: String(section.question || '').trim(),
+      options: section.options.map((item) => String(item ?? '').trim()),
+      correctAnswer: Math.round(correctAnswer),
+      explanation: String(section.explanation || section.body || '').trim(),
+    });
+  }
+
+  return questions;
+}
+
+function extractWrongReviewQuestionsFromQuiz(
+  content: HistoryContentItem,
+  wrongIndexes: number[]
+): WrongReviewQueueQuestion[] {
+  const quiz = Array.isArray(content.quiz) ? (content.quiz as QuizQuestion[]) : [];
+  if (quiz.length === 0) return [];
+
+  const questions: WrongReviewQueueQuestion[] = [];
+  for (const questionIndex of wrongIndexes) {
+    const question = quiz[questionIndex];
+    if (!question || !Array.isArray(question.options) || question.options.length < 2) continue;
+
+    const correctAnswer = Number(question.correct_answer);
+    if (!Number.isFinite(correctAnswer) || correctAnswer < 0 || correctAnswer >= question.options.length) continue;
+
+    questions.push({
+      contentId: content.id,
+      contentTitle: content.title,
+      topic: content.topic,
+      language: content.language,
+      difficulty: content.difficulty,
+      teachingMethod: content.teaching_method || null,
+      questionIndex,
+      question: String(question.question || '').trim(),
+      options: question.options.map((item) => String(item ?? '').trim()),
+      correctAnswer: Math.round(correctAnswer),
+      explanation: String(question.explanation || '').trim(),
+    });
+  }
+
+  return questions;
+}
+
+function extractWrongReviewQuestions(
+  content: HistoryContentItem,
+  wrongIndexes: number[]
+): WrongReviewQueueQuestion[] {
+  const sectionQuestions = extractWrongReviewQuestionsFromSections(content, wrongIndexes);
+  if (sectionQuestions.length > 0) return sectionQuestions;
+  return extractWrongReviewQuestionsFromQuiz(content, wrongIndexes);
+}
+
 export async function submitContentAssessmentAttempt(params: {
   contentId: string;
   attemptType: AssessmentAttemptType;
@@ -146,30 +253,8 @@ export async function getWrongReviewQueue(userId: string): Promise<WrongReviewQu
 
   const questions: WrongReviewQueueQuestion[] = [];
   for (const content of prioritizedContents) {
-    const quiz = Array.isArray(content.quiz) ? (content.quiz as QuizQuestion[]) : [];
-    if (quiz.length === 0) continue;
-
     const wrongIndexes = parseWrongQuestionIndexes(content.unresolved_wrong_indexes);
-    for (const questionIndex of wrongIndexes) {
-      const question = quiz[questionIndex];
-      if (!question || !Array.isArray(question.options) || question.options.length < 2) continue;
-      const correctAnswer = Number(question.correct_answer);
-      if (!Number.isFinite(correctAnswer) || correctAnswer < 0 || correctAnswer >= question.options.length) continue;
-
-      questions.push({
-        contentId: content.id,
-        contentTitle: content.title,
-        topic: content.topic,
-        language: content.language,
-        difficulty: content.difficulty,
-        teachingMethod: content.teaching_method || null,
-        questionIndex,
-        question: String(question.question || '').trim(),
-        options: question.options.map((item) => String(item ?? '').trim()),
-        correctAnswer: Math.round(correctAnswer),
-        explanation: String(question.explanation || '').trim(),
-      });
-    }
+    questions.push(...extractWrongReviewQuestions(content, wrongIndexes));
   }
 
   return questions;

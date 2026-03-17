@@ -43,7 +43,7 @@ export function TutorChat({
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-40 flex items-center gap-2 px-4 py-3 bg-accent text-white rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all"
+          className="fixed bottom-4 right-4 md:bottom-6 md:right-8 lg:right-10 z-40 flex items-center gap-2 px-4 py-3 bg-accent text-white rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all"
           aria-label="튜터에게 질문"
         >
           <HelpCircle className="w-5 h-5" />
@@ -53,7 +53,7 @@ export function TutorChat({
 
       {/* Chat panel */}
       {open && (
-        <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-40 w-[calc(100vw-2rem)] sm:w-[380px] h-[min(70vh,520px)] sm:h-[520px]">
+        <div className="fixed bottom-4 right-4 md:bottom-6 md:right-8 lg:right-10 z-40 w-[calc(100vw-2rem)] sm:w-[380px] h-[min(70vh,520px)] sm:h-[520px]">
           <ChatPanel
             chatType="tutor"
             contextId={curriculumId}

@@ -88,7 +88,7 @@ export function GenerateForm({ initialValues, preferredTeachingMethod }: Generat
   }
 
   return (
-    <div className="px-4 md:px-8 py-6 max-w-3xl">
+    <div className="px-4 md:px-8 py-6 max-w-5xl">
       <div className="mb-6">
         <h2 className="text-xl font-bold">AI 문제 훈련 세트 생성</h2>
         <p className="text-muted-foreground text-sm mt-1">

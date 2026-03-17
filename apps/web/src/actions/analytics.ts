@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { calculateRunFailureRate, toPercent } from '@/lib/analytics/run-metrics';
 import { buildErrorBreakdown, type ErrorMetric } from '@/lib/analytics/error-breakdown';
 import { avg, normalizeLogRows, summarizeUsageTotals, type AILogRow } from '@/lib/analytics/ops-metrics';
+import { shouldIncludeAIOpsRun } from '@/lib/analytics/ops-scope';
 
 interface PipelineMetric {
   pipeline: string;
@@ -183,7 +184,11 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
   const attemptRows: AssessmentAttemptRow[] = attemptsError
     ? []
     : ((attempts || []) as AssessmentAttemptRow[]);
-  const runRows = normalizeLogRows(logRows);
+  const filteredLogRows = logRows.filter((row) => shouldIncludeAIOpsRun({
+    pipeline: row.pipeline,
+    assessmentAnalysisMode: process.env.ASSESSMENT_ANALYSIS_MODE,
+  }));
+  const runRows = normalizeLogRows(filteredLogRows);
   const usageTotals = summarizeUsageTotals(runRows);
 
   const totalRuns = runRows.length;
