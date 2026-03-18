@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from app.domain.ai.providers.base import (
+    AIAttemptError,
+    AIResponseMeta,
+    StructuredAIResponse,
+    merge_ai_response_metas,
+)
+
 
 DEFAULT_RETRYABLE_FAILURE_KINDS = {"rate_limited", "timeout", "schema_mismatch"}
 
@@ -16,6 +23,7 @@ class PipelineFailure(RuntimeError):
         retryable: bool,
         reason: str,
         attempt_count: int,
+        response_meta: AIResponseMeta | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.kind = kind
@@ -23,6 +31,7 @@ class PipelineFailure(RuntimeError):
         self.retryable = retryable
         self.reason = reason
         self.attempt_count = attempt_count
+        self.response_meta = response_meta
         super().__init__(f"{pipeline}:{kind}:{reason}")
 
 
@@ -97,11 +106,19 @@ def run_ai_with_retry(
 ) -> tuple[Any, int]:
     attempts = max(1, int(max_attempts))
     retryable_kinds = retryable_kinds or set(DEFAULT_RETRYABLE_FAILURE_KINDS)
+    attempt_metas: list[AIResponseMeta] = []
 
     for attempt in range(1, attempts + 1):
         try:
-            return call(attempt), attempt
+            result = call(attempt)
+            if isinstance(result, StructuredAIResponse):
+                merged_meta = merge_ai_response_metas([*attempt_metas, result.meta])
+                if merged_meta is not None:
+                    result = StructuredAIResponse(data=result.data, meta=merged_meta)
+            return result, attempt
         except Exception as exc:
+            if isinstance(exc, AIAttemptError) and exc.meta is not None:
+                attempt_metas.append(exc.meta)
             reason = ai_error_detail(exc)
             kind, status_code, retryable = classify_ai_failure(reason)
             should_retry = (
@@ -118,6 +135,7 @@ def run_ai_with_retry(
                 retryable=retryable,
                 reason=reason,
                 attempt_count=attempt,
+                response_meta=merge_ai_response_metas(attempt_metas),
             ) from exc
 
     raise PipelineFailure(
@@ -127,4 +145,5 @@ def run_ai_with_retry(
         retryable=False,
         reason="ai_retry_exhausted",
         attempt_count=attempts,
+        response_meta=merge_ai_response_metas(attempt_metas),
     )

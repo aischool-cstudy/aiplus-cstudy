@@ -544,7 +544,7 @@ export async function updateCurriculumItemStatus(params: {
         .select('status')
         .eq('curriculum_id', item.curriculum_id);
 
-      const allCompleted = allItems?.every(i => i.status === 'completed');
+      const allCompleted = (allItems || []).every((i: { status: string | null }) => i.status === 'completed');
       if (allCompleted) {
         await supabase
           .from('user_curriculums')

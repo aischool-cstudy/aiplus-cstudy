@@ -3,18 +3,29 @@ import unittest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from app.domain.ai.providers.base import AIResponseMeta, StructuredAIResponse
 from app.services.compat import generation_service as gs
 from app.services.compat.error_policy import build_http_error_payload
 
 
 class _FakeAIService:
-    def __init__(self, response: dict):
+    def __init__(self, response: dict, *, response_meta: AIResponseMeta | None = None):
         self.response = response
+        self.response_meta = response_meta or AIResponseMeta(
+            provider="gemini",
+            model="gemini-2.0-flash",
+        )
         self.calls = 0
 
-    def generate_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+    def generate_json_with_meta(self, *, system_prompt: str, user_prompt: str) -> StructuredAIResponse:
         self.calls += 1
-        return self.response
+        return StructuredAIResponse(data=self.response, meta=self.response_meta)
+
+    def generate_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+        return self.generate_json_with_meta(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        ).data
 
 
 class CompatGenerateServiceTests(unittest.TestCase):
@@ -217,6 +228,20 @@ class CompatGenerateServiceTests(unittest.TestCase):
         self.assertIn("concept_missing", issues)
         self.assertIn("example_missing", issues)
         self.assertIn("check_count_lt_2", issues)
+
+    def test_assessment_questions_invalid_schema_retries_and_marks_fallback(self) -> None:
+        fake = _FakeAIService({"unexpected": "shape"})
+        gs._get_ai_service = lambda: fake
+
+        result = gs.compat_assessment_questions(
+            gs.AssessmentQuestionsRequest(goal="파이썬 리스트")
+        )
+
+        self.assertEqual(fake.calls, 2)
+        self.assertEqual(len(result["questions"]), 5)
+        self.assertEqual(result["meta"]["attempt_count"], 2)
+        self.assertTrue(result["meta"]["fallback_used"])
+        self.assertEqual(result["meta"]["failure_kind"], "schema_mismatch")
 
     def test_sections_quality_issues_detects_check_grounding_low(self) -> None:
         payload = gs.ReasoningRequest(

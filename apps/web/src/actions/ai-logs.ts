@@ -67,6 +67,14 @@ export async function insertAIGenerationLog(
     baseMetadata.fallbackKind = input.aiCallMeta.fallbackKind ?? null;
     baseMetadata.provider = input.aiCallMeta.provider || provider;
     baseMetadata.model = input.aiCallMeta.model || model;
+    baseMetadata.usage = input.aiCallMeta.usage || null;
+    baseMetadata.inputTokens = input.aiCallMeta.usage?.inputTokens ?? null;
+    baseMetadata.outputTokens = input.aiCallMeta.usage?.outputTokens ?? null;
+    baseMetadata.totalTokens = input.aiCallMeta.usage?.totalTokens ?? null;
+    baseMetadata.cachedInputTokens = input.aiCallMeta.usage?.cachedInputTokens ?? null;
+    baseMetadata.estimatedCostUsd = input.aiCallMeta.estimatedCostUsd ?? null;
+    baseMetadata.pricingSource = input.aiCallMeta.pricingSource ?? null;
+    baseMetadata.pricingReferenceUrl = input.aiCallMeta.pricingReferenceUrl ?? null;
   }
   const metadata = {
     ...baseMetadata,

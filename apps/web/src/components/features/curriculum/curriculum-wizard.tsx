@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { startTransition, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   generateAssessmentQuestions,
@@ -108,19 +108,21 @@ export function CurriculumWizard({
 
   useEffect(() => {
     const saved = loadFromSession();
-    if (saved) {
-      const validSteps: WizardStep[] = ['goal', 'assessment', 'assessment-result', 'curriculum', 'refine', 'schedule', 'done'];
-      const savedStep = saved.step as WizardStep;
-      if (validSteps.includes(savedStep)) setStep(savedStep);
-      setGoal((saved.goal as string) || initialGoal || '');
-      setQuestions((saved.questions as AssessmentQuestion[]) || []);
-      setAnswers((saved.answers as Record<number, number>) || {});
-      setAssessmentResult((saved.assessmentResult as AssessmentResult | null) || null);
-      setCurriculum((saved.curriculum as CurriculumData | null) || null);
-      setDailyMinutes((saved.dailyMinutes as number) || 60);
-      setTeachingMethod(normalizeTeachingMethod((saved.teachingMethod as string) || defaultTeachingMethod));
-    }
-    setHasRestoredSession(true);
+    startTransition(() => {
+      if (saved) {
+        const validSteps: WizardStep[] = ['goal', 'assessment', 'assessment-result', 'curriculum', 'refine', 'schedule', 'done'];
+        const savedStep = saved.step as WizardStep;
+        if (validSteps.includes(savedStep)) setStep(savedStep);
+        setGoal((saved.goal as string) || initialGoal || '');
+        setQuestions((saved.questions as AssessmentQuestion[]) || []);
+        setAnswers((saved.answers as Record<number, number>) || {});
+        setAssessmentResult((saved.assessmentResult as AssessmentResult | null) || null);
+        setCurriculum((saved.curriculum as CurriculumData | null) || null);
+        setDailyMinutes((saved.dailyMinutes as number) || 60);
+        setTeachingMethod(normalizeTeachingMethod((saved.teachingMethod as string) || defaultTeachingMethod));
+      }
+      setHasRestoredSession(true);
+    });
   }, [defaultTeachingMethod, initialGoal]);
 
   // 상태 변경 시 세션 저장
@@ -313,7 +315,7 @@ export function CurriculumWizard({
     : null;
 
   return (
-    <div className="px-4 md:px-8 py-6 max-w-3xl">
+    <div className="px-4 md:px-8 py-6 max-w-5xl">
       {/* Progress bar */}
       <div className="flex gap-2 mb-8">
         {['goal', 'assessment', 'curriculum', 'schedule'].map((s, i) => {

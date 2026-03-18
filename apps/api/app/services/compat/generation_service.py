@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.domain.ai import build_ai_service
+from app.domain.ai.providers.base import AIAttemptError, AIResponseMeta, StructuredAIResponse
 from app.services.compat.error_policy import build_structured_error_detail
 from app.services.compat.normalizer_validator import (
     extract_enumerated_options,
@@ -79,6 +80,66 @@ def _raise_direct_provider_http_exception(pipeline: str, exc: Exception) -> None
             detail=format_pipeline_error_detail(pipeline, code, reason),
         ),
     ) from exc
+
+
+def _serialize_ai_response_meta(
+    response_meta: AIResponseMeta | None,
+    *,
+    attempt_count: int | None = None,
+    fallback_used: bool | None = None,
+    failure_kind: str | None = None,
+) -> dict[str, Any]:
+    serialized: dict[str, Any] = {}
+
+    if response_meta is not None:
+        serialized["provider"] = response_meta.provider
+        serialized["model"] = response_meta.model
+        if response_meta.usage is not None:
+            usage_payload: dict[str, int] = {}
+            if response_meta.usage.input_tokens is not None:
+                usage_payload["input_tokens"] = response_meta.usage.input_tokens
+            if response_meta.usage.output_tokens is not None:
+                usage_payload["output_tokens"] = response_meta.usage.output_tokens
+            if response_meta.usage.total_tokens is not None:
+                usage_payload["total_tokens"] = response_meta.usage.total_tokens
+            if response_meta.usage.cached_input_tokens is not None:
+                usage_payload["cached_input_tokens"] = response_meta.usage.cached_input_tokens
+            if usage_payload:
+                serialized["usage"] = usage_payload
+
+    if attempt_count is not None:
+        serialized["attempt_count"] = attempt_count
+    if fallback_used is not None:
+        serialized["fallback_used"] = fallback_used
+        serialized["failure_kind"] = failure_kind
+    elif failure_kind is not None:
+        serialized["failure_kind"] = failure_kind
+
+    return serialized
+
+
+def _with_response_meta(
+    payload: dict[str, Any],
+    response_meta: AIResponseMeta | None,
+    *,
+    attempt_count: int | None = None,
+    fallback_used: bool | None = None,
+    failure_kind: str | None = None,
+) -> dict[str, Any]:
+    result = dict(payload)
+    existing_meta = result.get("meta")
+    merged_meta = {
+        **(existing_meta if isinstance(existing_meta, dict) else {}),
+        **_serialize_ai_response_meta(
+            response_meta,
+            attempt_count=attempt_count,
+            fallback_used=fallback_used,
+            failure_kind=failure_kind,
+        ),
+    }
+    if merged_meta:
+        result["meta"] = merged_meta
+    return result
 
 
 class GenerateRequest(BaseModel):
@@ -599,10 +660,17 @@ def _fallback_assessment_questions(goal: str) -> dict[str, Any]:
     }
 
 
-def _normalize_assessment_questions(raw: dict[str, Any], goal: str) -> dict[str, Any]:
+def _normalize_assessment_questions(
+    raw: dict[str, Any],
+    goal: str,
+    *,
+    strict_schema: bool = False,
+) -> dict[str, Any]:
     fallback = _fallback_assessment_questions(goal)
     raw_items = raw.get("questions")
     if not isinstance(raw_items, list) or not raw_items:
+        if strict_schema:
+            raise ValueError("assessment_questions_schema_mismatch")
         return fallback
 
     questions: list[dict[str, Any]] = []
@@ -680,6 +748,26 @@ def _build_assessment_questions_prompts(payload: AssessmentQuestionsRequest) -> 
         "목표 달성에 필요한 진단 문제를 생성하세요."
     )
     return system_prompt, user_prompt
+
+
+def _generate_assessment_questions_with_meta(
+    ai_service: Any,
+    payload: AssessmentQuestionsRequest,
+) -> StructuredAIResponse:
+    system_prompt, user_prompt = _build_assessment_questions_prompts(payload)
+    response = ai_service.generate_json_with_meta(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+    try:
+        normalized = _normalize_assessment_questions(
+            response.data,
+            payload.goal,
+            strict_schema=True,
+        )
+    except Exception as exc:
+        raise AIAttemptError(str(exc), meta=response.meta) from exc
+    return StructuredAIResponse(data=normalized, meta=response.meta)
 
 
 def _build_rule_assessment_result(payload: AssessmentAnalyzeRequest) -> dict[str, Any]:
@@ -1024,12 +1112,15 @@ def _generate_curriculum_with_quality(
     ai_service: Any,
     payload: CurriculumGenerateRequest,
     retry_mode: bool,
-) -> dict[str, Any]:
+) -> StructuredAIResponse:
     system_prompt, user_prompt = _build_curriculum_prompts(payload, retry_mode=retry_mode)
-    raw = ai_service.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
-    normalized = _normalize_curriculum(raw, payload, strict=True)
-    _assert_curriculum_quality(normalized, payload)
-    return normalized
+    response = ai_service.generate_json_with_meta(system_prompt=system_prompt, user_prompt=user_prompt)
+    try:
+        normalized = _normalize_curriculum(response.data, payload, strict=True)
+        _assert_curriculum_quality(normalized, payload)
+    except Exception as exc:
+        raise AIAttemptError(str(exc), meta=response.meta) from exc
+    return StructuredAIResponse(data=normalized, meta=response.meta)
 
 
 def _build_refine_prompts(payload: CurriculumRefineRequest) -> tuple[str, str]:
@@ -1325,12 +1416,15 @@ def _generate_sections_with_quality(
     payload: ReasoningRequest,
     reasoning: dict[str, Any],
     retry_mode: bool,
-) -> dict[str, Any]:
+) -> StructuredAIResponse:
     system_prompt, user_prompt = _build_sections_prompts(payload, reasoning, retry_mode=retry_mode)
-    raw = ai_service.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
-    normalized = _normalize_sections(raw, payload, reasoning)
-    _assert_sections_quality(normalized, payload)
-    return normalized
+    response = ai_service.generate_json_with_meta(system_prompt=system_prompt, user_prompt=user_prompt)
+    try:
+        normalized = _normalize_sections(response.data, payload, reasoning)
+        _assert_sections_quality(normalized, payload)
+    except Exception as exc:
+        raise AIAttemptError(str(exc), meta=response.meta) from exc
+    return StructuredAIResponse(data=normalized, meta=response.meta)
 
 
 def _as_non_empty_str(value: Any, fallback: str) -> str:
@@ -1685,18 +1779,21 @@ def _generate_content_with_quality(
     ai_service: Any,
     payload: GenerateRequest,
     retry_mode: bool,
-) -> dict[str, Any]:
+) -> StructuredAIResponse:
     system_prompt, user_prompt = _build_generate_prompts(payload, retry_mode=retry_mode)
-    raw = ai_service.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
-    normalized = _normalize_generated_content(raw, payload)
-    _assert_generated_content_quality(normalized, payload)
-    return normalized
+    response = ai_service.generate_json_with_meta(system_prompt=system_prompt, user_prompt=user_prompt)
+    try:
+        normalized = _normalize_generated_content(response.data, payload)
+        _assert_generated_content_quality(normalized, payload)
+    except Exception as exc:
+        raise AIAttemptError(str(exc), meta=response.meta) from exc
+    return StructuredAIResponse(data=normalized, meta=response.meta)
 
 
 def compat_generate(payload: GenerateRequest) -> dict[str, Any]:
     retryable_kinds = {"rate_limited", "timeout", "schema_mismatch", "quality_failed"}
     try:
-        generated, _attempt_count = run_ai_with_retry(
+        generated, attempt_count = run_ai_with_retry(
             lambda attempt: _generate_content_with_quality(
                 ai_service=_require_ai_service(),
                 payload=payload,
@@ -1706,7 +1803,7 @@ def compat_generate(payload: GenerateRequest) -> dict[str, Any]:
             max_attempts=2,
             retryable_kinds=retryable_kinds,
         )
-        return generated
+        return _with_response_meta(generated.data, generated.meta, attempt_count=attempt_count)
     except PipelineFailure as failure:
         _raise_pipeline_http_exception(failure)
 
@@ -1740,36 +1837,24 @@ def compat_recommendations(payload: RecommendRequest) -> dict[str, Any]:
 
 
 def compat_assessment_questions(payload: AssessmentQuestionsRequest) -> dict[str, Any]:
-    system_prompt, user_prompt = _build_assessment_questions_prompts(payload)
     try:
         raw, attempt_count = run_ai_with_retry(
-            lambda _attempt: _require_ai_service().generate_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
+            lambda _attempt: _generate_assessment_questions_with_meta(
+                _require_ai_service(),
+                payload,
             ),
             pipeline="assessment_questions",
             max_attempts=2,
             retryable_kinds=set(DEFAULT_RETRYABLE_FAILURE_KINDS),
         )
-        normalized = _normalize_assessment_questions(raw, payload.goal)
-        return {
-            "questions": normalized["questions"],
-            "meta": {
-                "fallback_used": False,
-                "failure_kind": None,
-                "attempt_count": attempt_count,
-            },
-        }
+        return _with_response_meta({
+            "questions": raw.data["questions"],
+        }, raw.meta, attempt_count=attempt_count, fallback_used=False, failure_kind=None)
     except PipelineFailure as failure:
         fallback = _fallback_assessment_questions(payload.goal)
-        return {
+        return _with_response_meta({
             "questions": fallback["questions"],
-            "meta": {
-                "fallback_used": True,
-                "failure_kind": failure.kind,
-                "attempt_count": failure.attempt_count,
-            },
-        }
+        }, failure.response_meta, attempt_count=failure.attempt_count, fallback_used=True, failure_kind=failure.kind)
 
 
 def compat_assessment_analyze(payload: AssessmentAnalyzeRequest) -> dict[str, Any]:
@@ -1803,7 +1888,8 @@ def compat_assessment_analyze(payload: AssessmentAnalyzeRequest) -> dict[str, An
     )
 
     try:
-        raw = ai_service.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
+        response = ai_service.generate_json_with_meta(system_prompt=system_prompt, user_prompt=user_prompt)
+        raw = response.data
         level = _as_non_empty_str(raw.get("level"), "beginner").lower()
         if level not in {"beginner", "intermediate", "advanced"}:
             level = "beginner"
@@ -1814,12 +1900,12 @@ def compat_assessment_analyze(payload: AssessmentAnalyzeRequest) -> dict[str, An
         weaknesses = [str(item).strip() for item in weaknesses if str(item).strip()][:4]
         if not weaknesses:
             weaknesses = ["실전 문제 적용력"]
-        return {
+        return _with_response_meta({
             "level": level,
             "summary": summary,
             "strengths": strengths,
             "weaknesses": weaknesses,
-        }
+        }, response.meta)
     except Exception as exc:
         _raise_direct_provider_http_exception("assessment_analyze", exc)
 
@@ -1827,7 +1913,7 @@ def compat_assessment_analyze(payload: AssessmentAnalyzeRequest) -> dict[str, An
 def compat_curriculum_generate(payload: CurriculumGenerateRequest) -> dict[str, Any]:
     retryable_kinds = {"rate_limited", "timeout", "schema_mismatch", "quality_failed"}
     try:
-        generated, _attempt_count = run_ai_with_retry(
+        generated, attempt_count = run_ai_with_retry(
             lambda attempt: _generate_curriculum_with_quality(
                 ai_service=_require_ai_service(),
                 payload=payload,
@@ -1837,7 +1923,7 @@ def compat_curriculum_generate(payload: CurriculumGenerateRequest) -> dict[str, 
             max_attempts=2,
             retryable_kinds=retryable_kinds,
         )
-        return generated
+        return _with_response_meta(generated.data, generated.meta, attempt_count=attempt_count)
     except PipelineFailure as failure:
         _raise_pipeline_http_exception(failure)
 
@@ -1857,8 +1943,8 @@ def compat_curriculum_refine(payload: CurriculumRefineRequest) -> dict[str, Any]
 
     system_prompt, user_prompt = _build_refine_prompts(payload)
     try:
-        raw = ai_service.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
-        return _normalize_curriculum(raw, request_for_fallback)
+        response = ai_service.generate_json_with_meta(system_prompt=system_prompt, user_prompt=user_prompt)
+        return _with_response_meta(_normalize_curriculum(response.data, request_for_fallback), response.meta)
     except Exception as exc:
         _raise_direct_provider_http_exception("curriculum_refine", exc)
 
@@ -1868,8 +1954,8 @@ def compat_curriculum_reasoning(payload: ReasoningRequest) -> dict[str, Any]:
 
     system_prompt, user_prompt = _build_reasoning_prompts(payload)
     try:
-        raw = ai_service.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
-        return _normalize_reasoning(raw, payload)
+        response = ai_service.generate_json_with_meta(system_prompt=system_prompt, user_prompt=user_prompt)
+        return _with_response_meta(_normalize_reasoning(response.data, payload), response.meta)
     except Exception as exc:
         _raise_direct_provider_http_exception("curriculum_reasoning", exc)
 
@@ -1888,26 +1974,24 @@ def compat_curriculum_sections(payload: SectionsRequest) -> dict[str, Any]:
             max_attempts=2,
             retryable_kinds=retryable_kinds,
         )
-        return {
-            **generated,
-            "meta": {
-                "fallback_used": False,
-                "failure_kind": None,
-                "attempt_count": attempt_count,
-            },
-        }
+        return _with_response_meta(
+            generated.data,
+            generated.meta,
+            attempt_count=attempt_count,
+            fallback_used=False,
+            failure_kind=None,
+        )
     except PipelineFailure as failure:
         if failure.kind in retryable_kinds:
             # 재시도 후에도 품질/지연 문제가 있으면 학습 흐름 보장을 위해 폴백
             fallback = _fallback_sections(payload.input, payload.reasoning)
-            return {
-                **fallback,
-                "meta": {
-                    "fallback_used": True,
-                    "failure_kind": failure.kind,
-                    "attempt_count": failure.attempt_count,
-                },
-            }
+            return _with_response_meta(
+                fallback,
+                failure.response_meta,
+                attempt_count=failure.attempt_count,
+                fallback_used=True,
+                failure_kind=failure.kind,
+            )
         _raise_pipeline_http_exception(failure)
 
 

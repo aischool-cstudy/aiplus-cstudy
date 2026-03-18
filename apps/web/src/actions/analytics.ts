@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { calculateRunFailureRate, toPercent } from '@/lib/analytics/run-metrics';
 import { buildErrorBreakdown, type ErrorMetric } from '@/lib/analytics/error-breakdown';
+import { avg, normalizeLogRows, summarizeUsageTotals, type AILogRow } from '@/lib/analytics/ops-metrics';
+import { shouldIncludeAIOpsRun } from '@/lib/analytics/ops-scope';
 
 interface PipelineMetric {
   pipeline: string;
@@ -13,6 +15,9 @@ interface PipelineMetric {
   abandoned: number;
   failureRate: number;
   avgLatencyMs: number;
+  totalTokens: number;
+  costEstimatedRuns: number;
+  totalEstimatedCostUsd: number;
 }
 
 interface ProviderModelMetric {
@@ -25,6 +30,9 @@ interface ProviderModelMetric {
   abandoned: number;
   failureRate: number;
   avgLatencyMs: number;
+  totalTokens: number;
+  costEstimatedRuns: number;
+  totalEstimatedCostUsd: number;
 }
 
 interface RecommendationMetric {
@@ -37,6 +45,18 @@ interface RecommendationMetric {
   completionRate: number;
 }
 
+interface RecommendationEventRow {
+  surface: string | null;
+  action_type: string | null;
+  created_at?: string | null;
+}
+
+interface AssessmentAttemptRow {
+  attempt_type: string | null;
+  score: number | string | null;
+  created_at?: string | null;
+}
+
 export interface AIOpsMetrics {
   days: number;
   totalRuns: number;
@@ -46,6 +66,16 @@ export interface AIOpsMetrics {
   abandonedRuns: number;
   failureRate: number;
   avgLatencyMs: number;
+  usage: {
+    meteredRuns: number;
+    costEstimatedRuns: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTokens: number;
+    avgTokensPerMeteredRun: number;
+    totalEstimatedCostUsd: number;
+    avgEstimatedCostUsdPerEstimatedRun: number;
+  };
   pipelines: PipelineMetric[];
   providerModels: ProviderModelMetric[];
   errorCodes: ErrorMetric[];
@@ -71,11 +101,6 @@ export interface AIOpsMetrics {
     wrongOnlyAttempts: number;
     variantAttempts: number;
   };
-}
-
-function avg(values: number[]): number {
-  if (values.length === 0) return 0;
-  return Math.round(values.reduce((sum, n) => sum + n, 0) / values.length);
 }
 
 function emptyMetrics(days: number): AIOpsMetrics {
@@ -113,201 +138,17 @@ function emptyMetrics(days: number): AIOpsMetrics {
       wrongOnlyAttempts: 0,
       variantAttempts: 0,
     },
+    usage: {
+      meteredRuns: 0,
+      costEstimatedRuns: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalTokens: 0,
+      avgTokensPerMeteredRun: 0,
+      totalEstimatedCostUsd: 0,
+      avgEstimatedCostUsdPerEstimatedRun: 0,
+    },
   };
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
-function parseAICallInfo(metadataValue: unknown): {
-  provider: string;
-  model: string;
-  attemptCount: number;
-  retried: boolean;
-  fallbackUsed: boolean;
-  fallbackKind: string | null;
-} {
-  const metadata = asObject(metadataValue) || {};
-  const aiCall = asObject(metadata.aiCall) || {};
-
-  const provider = String(aiCall.provider || metadata.provider || metadata.aiProvider || 'unknown').trim() || 'unknown';
-  const model = String(aiCall.model || metadata.model || metadata.aiModel || 'unknown').trim() || 'unknown';
-  const attemptCandidate = Number(aiCall.attemptCount || metadata.attemptCount || metadata.aiAttemptCount || 1);
-  const attemptCount = Number.isFinite(attemptCandidate) && attemptCandidate > 0
-    ? Math.max(1, Math.round(attemptCandidate))
-    : 1;
-  const fallbackUsed = (
-    aiCall.fallbackUsed === true
-    || metadata.fallbackUsed === true
-  );
-  const fallbackKindCandidate = aiCall.fallbackKind ?? metadata.fallbackKind;
-  const fallbackKind = typeof fallbackKindCandidate === 'string'
-    ? fallbackKindCandidate
-    : null;
-
-  return {
-    provider,
-    model,
-    attemptCount,
-    retried: attemptCount > 1,
-    fallbackUsed,
-    fallbackKind,
-  };
-}
-
-type LogStatus = 'started' | 'success' | 'failed';
-type RunStatus = 'running' | 'completed' | 'failed' | 'abandoned';
-
-interface AILogRow {
-  id: string | null;
-  pipeline: string | null;
-  status: string | null;
-  error_code: string | null;
-  error_message: string | null;
-  latency_ms: number | null;
-  metadata: unknown;
-  created_at: string | null;
-}
-
-interface RunRowSnapshot {
-  status: LogStatus;
-  errorCode: string | null;
-  errorMessage: string;
-  latencyMs: number | null;
-  callInfo: ReturnType<typeof parseAICallInfo>;
-  createdAtMs: number | null;
-}
-
-interface RunMetric {
-  pipeline: string;
-  status: RunStatus;
-  latencyMs: number | null;
-  provider: string;
-  model: string;
-  retried: boolean;
-  fallbackUsed: boolean;
-  attemptCount: number;
-  terminalErrorCode: string | null;
-  terminalErrorMessage: string;
-}
-
-function normalizeStatus(value: unknown): LogStatus {
-  const normalized = String(value || '').toLowerCase().trim();
-  if (normalized === 'success' || normalized === 'failed') return normalized;
-  return 'started';
-}
-
-function parseTraceId(metadataValue: unknown): string | null {
-  const metadata = asObject(metadataValue);
-  const traceId = metadata?.traceId;
-  if (typeof traceId !== 'string') return null;
-  const trimmed = traceId.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function parseLatency(value: unknown): number | null {
-  const latency = Number(value);
-  if (!Number.isFinite(latency) || latency < 0) return null;
-  return latency;
-}
-
-function parseCreatedAtMs(value: unknown): number | null {
-  const text = String(value || '').trim();
-  if (!text) return null;
-  const timestamp = Date.parse(text);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function normalizeLogRows(logRows: AILogRow[]): RunMetric[] {
-  const RUNNING_STALE_MS = 15 * 60 * 1000;
-  const runMap = new Map<string, {
-    pipeline: string;
-    rows: RunRowSnapshot[];
-  }>();
-
-  logRows.forEach((row, idx) => {
-    const pipeline = String(row.pipeline || 'unknown');
-    const traceId = parseTraceId(row.metadata);
-    const fallbackKey = row.id || `${pipeline}:${idx}`;
-    const runKey = traceId ? `${pipeline}::${traceId}` : `legacy::${fallbackKey}`;
-    const bucket = runMap.get(runKey) || { pipeline, rows: [] };
-
-    bucket.rows.push({
-      status: normalizeStatus(row.status),
-      errorCode: row.error_code ? String(row.error_code) : null,
-      errorMessage: String(row.error_message || ''),
-      latencyMs: parseLatency(row.latency_ms),
-      callInfo: parseAICallInfo(row.metadata),
-      createdAtMs: parseCreatedAtMs(row.created_at),
-    });
-
-    runMap.set(runKey, bucket);
-  });
-
-  const now = Date.now();
-  const runs: RunMetric[] = [];
-
-  for (const bucket of runMap.values()) {
-    if (bucket.rows.length === 0) continue;
-
-    const rows = bucket.rows;
-    const terminalRow = [...rows].reverse().find((row) => row.status === 'success' || row.status === 'failed') || null;
-    const representativeRow = terminalRow || rows[rows.length - 1];
-
-    const lastCreatedAtMs = rows
-      .map((row) => row.createdAtMs)
-      .filter((value): value is number => value !== null)
-      .sort((a, b) => b - a)[0] || null;
-
-    let status: RunStatus;
-    if (terminalRow?.status === 'success') {
-      status = 'completed';
-    } else if (terminalRow?.status === 'failed') {
-      status = 'failed';
-    } else if (lastCreatedAtMs !== null && (now - lastCreatedAtMs) <= RUNNING_STALE_MS) {
-      status = 'running';
-    } else {
-      status = 'abandoned';
-    }
-
-    const attemptCount = rows.reduce(
-      (maxAttempt, row) => Math.max(maxAttempt, row.callInfo.attemptCount),
-      1
-    );
-    const retried = rows.some((row) => row.callInfo.retried);
-    const fallbackUsed = rows.some((row) => row.callInfo.fallbackUsed);
-    const latencies = rows
-      .map((row) => row.latencyMs)
-      .filter((value): value is number => value !== null);
-    const latencyMs = terminalRow?.latencyMs ?? (latencies.length > 0 ? Math.max(...latencies) : null);
-
-    runs.push({
-      pipeline: bucket.pipeline,
-      status,
-      latencyMs,
-      provider: representativeRow.callInfo.provider,
-      model: representativeRow.callInfo.model,
-      retried,
-      fallbackUsed,
-      attemptCount,
-      terminalErrorCode: status === 'failed'
-        ? (terminalRow?.errorCode || 'unknown')
-        : status === 'abandoned'
-          ? 'terminal_status_missing'
-          : null,
-      terminalErrorMessage: status === 'failed'
-        ? String(terminalRow?.errorMessage || '')
-        : status === 'abandoned'
-          ? 'terminal status missing'
-          : '',
-    });
-  }
-
-  return runs;
 }
 
 export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
@@ -337,9 +178,18 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
   ]);
 
   const logRows: AILogRow[] = logsError ? [] : ((logs || []) as AILogRow[]);
-  const recommendationRows = recommendationError ? [] : (recommendationEvents || []);
-  const attemptRows = attemptsError ? [] : (attempts || []);
-  const runRows = normalizeLogRows(logRows);
+  const recommendationRows: RecommendationEventRow[] = recommendationError
+    ? []
+    : ((recommendationEvents || []) as RecommendationEventRow[]);
+  const attemptRows: AssessmentAttemptRow[] = attemptsError
+    ? []
+    : ((attempts || []) as AssessmentAttemptRow[]);
+  const filteredLogRows = logRows.filter((row) => shouldIncludeAIOpsRun({
+    pipeline: row.pipeline,
+    assessmentAnalysisMode: process.env.ASSESSMENT_ANALYSIS_MODE,
+  }));
+  const runRows = normalizeLogRows(filteredLogRows);
+  const usageTotals = summarizeUsageTotals(runRows);
 
   const totalRuns = runRows.length;
   const runningRuns = runRows.filter((row) => row.status === 'running').length;
@@ -358,6 +208,10 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
     failed: number;
     abandoned: number;
     latencies: number[];
+    meteredRuns: number;
+    totalTokens: number;
+    costEstimatedRuns: number;
+    totalEstimatedCostUsd: number;
   }>();
   const providerModelMap = new Map<string, {
     provider: string;
@@ -368,6 +222,10 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
     failed: number;
     abandoned: number;
     latencies: number[];
+    meteredRuns: number;
+    totalTokens: number;
+    costEstimatedRuns: number;
+    totalEstimatedCostUsd: number;
   }>();
 
   for (const row of runRows) {
@@ -379,6 +237,10 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
       failed: 0,
       abandoned: 0,
       latencies: [],
+      meteredRuns: 0,
+      totalTokens: 0,
+      costEstimatedRuns: 0,
+      totalEstimatedCostUsd: 0,
     };
     existing.total += 1;
     if (row.status === 'running') existing.running += 1;
@@ -386,6 +248,10 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
     if (row.status === 'failed') existing.failed += 1;
     if (row.status === 'abandoned') existing.abandoned += 1;
     if (typeof row.latencyMs === 'number') existing.latencies.push(row.latencyMs);
+    if (row.usage.metered) existing.meteredRuns += 1;
+    existing.totalTokens += row.usage.totalTokens;
+    if (row.usage.costEstimated) existing.costEstimatedRuns += 1;
+    existing.totalEstimatedCostUsd += row.usage.estimatedCostUsd;
     pipelineMap.set(key, existing);
 
     const modelKey = `${row.provider}::${row.model}`;
@@ -398,6 +264,10 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
       failed: 0,
       abandoned: 0,
       latencies: [],
+      meteredRuns: 0,
+      totalTokens: 0,
+      costEstimatedRuns: 0,
+      totalEstimatedCostUsd: 0,
     };
     existingModel.total += 1;
     if (row.status === 'running') existingModel.running += 1;
@@ -405,6 +275,10 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
     if (row.status === 'failed') existingModel.failed += 1;
     if (row.status === 'abandoned') existingModel.abandoned += 1;
     if (typeof row.latencyMs === 'number') existingModel.latencies.push(row.latencyMs);
+    if (row.usage.metered) existingModel.meteredRuns += 1;
+    existingModel.totalTokens += row.usage.totalTokens;
+    if (row.usage.costEstimated) existingModel.costEstimatedRuns += 1;
+    existingModel.totalEstimatedCostUsd += row.usage.estimatedCostUsd;
     providerModelMap.set(modelKey, existingModel);
   }
 
@@ -423,6 +297,9 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
           abandonedRuns: metric.abandoned,
         }),
         avgLatencyMs: avg(metric.latencies),
+        totalTokens: metric.totalTokens,
+        costEstimatedRuns: metric.costEstimatedRuns,
+        totalEstimatedCostUsd: metric.totalEstimatedCostUsd,
       };
     })
     .sort((a, b) => b.total - a.total);
@@ -443,6 +320,9 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
           abandonedRuns: metric.abandoned,
         }),
         avgLatencyMs: avg(metric.latencies),
+        totalTokens: metric.totalTokens,
+        costEstimatedRuns: metric.costEstimatedRuns,
+        totalEstimatedCostUsd: metric.totalEstimatedCostUsd,
       };
     })
     .sort((a, b) => b.total - a.total);
@@ -515,6 +395,16 @@ export async function getAIOpsMetrics(days = 7): Promise<AIOpsMetrics> {
       abandonedRuns,
     }),
     avgLatencyMs: avg(latencies),
+    usage: {
+      meteredRuns: usageTotals.meteredRuns,
+      costEstimatedRuns: usageTotals.costEstimatedRuns,
+      totalInputTokens: usageTotals.inputTokens,
+      totalOutputTokens: usageTotals.outputTokens,
+      totalTokens: usageTotals.totalTokens,
+      avgTokensPerMeteredRun: usageTotals.avgTokensPerMeteredRun,
+      totalEstimatedCostUsd: usageTotals.estimatedCostUsd,
+      avgEstimatedCostUsdPerEstimatedRun: usageTotals.avgEstimatedCostUsdPerEstimatedRun,
+    },
     pipelines,
     providerModels,
     errorCodes,

@@ -15,6 +15,11 @@ import { Badge } from '@/components/ui/badge';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import type { UserCurriculum, CurriculumItem, DaySchedule } from '@/types';
 import { getTeachingMethodLabel } from '@/lib/ai/teaching-methods';
+import {
+  getCurriculumDay,
+  normalizeCurriculumTotalDays,
+  parseCurriculumStartDate,
+} from '@/lib/curriculum/day';
 import { CurriculumDeleteButton } from './curriculum-delete-button';
 
 interface CurriculumDetailProps {
@@ -47,17 +52,15 @@ export function CurriculumDetail({ curriculum, items }: CurriculumDetailProps) {
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   // 오늘이 몇째 날인지 계산 (같은 날짜는 항상 Day 1)
-  const startDate = curriculum.start_date ? new Date(`${curriculum.start_date}T00:00:00`) : null;
-  const today = new Date();
-  const elapsedDays = startDate
-    ? Math.max(0, Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)))
-    : 0;
-  const currentDay = elapsedDays + 1;
+  const totalDays = normalizeCurriculumTotalDays(curriculum.total_days);
+  const startDate = parseCurriculumStartDate(curriculum.start_date);
+  const currentDay = getCurriculumDay(curriculum.start_date, totalDays);
+  const activeDay = startDate ? currentDay : null;
 
   const status = statusConfig[curriculum.status] || statusConfig.draft;
 
   return (
-    <div className="px-4 md:px-8 py-6 max-w-4xl">
+    <div className="px-4 md:px-8 py-6 max-w-5xl">
       <div className="flex items-center justify-between mb-4">
         <Link href="/curriculum" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="w-4 h-4" /> 커리큘럼 목록
@@ -80,16 +83,16 @@ export function CurriculumDetail({ curriculum, items }: CurriculumDetailProps) {
             <div className="flex items-center gap-4 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Calendar className="w-4 h-4" />
-                {curriculum.total_days}일 과정
+                {totalDays}일 과정
               </span>
               <span className="flex items-center gap-1">
                 <BookOpen className="w-4 h-4" />
                 {completedCount}/{totalCount} 완료
               </span>
-              {startDate && (
+              {activeDay !== null && (
                 <span className="flex items-center gap-1">
                   <Clock className="w-4 h-4" />
-                  Day {Math.min(currentDay, curriculum.total_days)}
+                  Day {activeDay}
                 </span>
               )}
             </div>
@@ -102,7 +105,7 @@ export function CurriculumDetail({ curriculum, items }: CurriculumDetailProps) {
       {/* Daily schedule */}
       <div className="space-y-4">
         {days.map(({ day, items: dayItems }) => {
-          const isToday = day === Math.min(currentDay, curriculum.total_days);
+          const isToday = activeDay !== null && day === activeDay;
           const dayCompleted = dayItems.every(i => i.status === 'completed');
 
           return (
