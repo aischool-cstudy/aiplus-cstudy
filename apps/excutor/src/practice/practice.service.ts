@@ -24,7 +24,6 @@ const DOCKER_ARGS = [
   '--cpus', '0.5',
   '--pids-limit', '50',
   '--read-only',
-  '--tmpfs', '/tmp:size=32m,noexec',
   '-i',
   'python:3.12-slim',
   'python', '-',
